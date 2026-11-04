@@ -1,0 +1,90 @@
+
+.dial-stats{margin-bottom:17px}.dial-work{display:grid;grid-template-columns:minmax(230px,330px) minmax(0,1fr);gap:16px;align-items:start}
+.dial-queue{min-width:0;overflow:hidden}.dial-queue-top{padding:20px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #e7edf2}
+.dial-queue-top h2{font:800 15px Manrope;margin:0}.dial-queue-top small{font-size:11px;color:#8a9aa7}
+.dial-filters{display:flex;flex-direction:column;padding:14px;gap:10px}.dial-filters input:not([type=checkbox]){border:1px solid #dde5eb;border-radius:8px;padding:11px;font-size:12px;width:100%}
+.dial-filters label{display:flex;align-items:center;gap:8px;font-size:11px;color:#738696}
+.dial-scroller{max-height:680px;overflow:auto}.dial-lead-row{border:0;border-bottom:1px solid #edf1f5;width:100%;padding:13px;display:flex;align-items:start;gap:11px;text-align:left;background:white;cursor:pointer}
+.dial-lead-row.selected{background:#e7f9f2;border-left:3px solid #05ac92}.dial-lead-row>span:nth-child(2){flex:1;min-width:0}.dial-lead-row strong,.dial-lead-row small{display:block}
+.dial-lead-row strong{font-size:12px;color:#2f4359}.dial-lead-row small{font-size:10px;color:#8495a5;margin-top:5px}.dial-lead-row b{font-size:12px;color:#0d987c}
+.dial-num{background:#eaf1f4;color:#8da0b0;border-radius:6px;padding:6px;font-size:10px;font-weight:800}
+.dial-preview{overflow:hidden}.dial-preview-head{display:flex;justify-content:space-between;gap:10px;padding:22px;border-bottom:1px solid #e8eef1}
+.dial-eyebrow{font-size:10px;letter-spacing:1.5px;color:#07a68c;font-weight:800}.dial-preview-head h2{font:800 23px Manrope;margin:8px 0;color:#263d53}
+.dial-preview-head p{font-size:12px;color:#708497;margin:0 0 8px}.dial-preview-head small{font-size:11px;color:#88a39c}
+.dial-score{border-radius:50%;border:4px solid #c6eee5;padding:14px;font:800 18px Manrope;color:#0e9e83}
+.dial-preview-data{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;padding:19px 22px}.dial-preview-data span{display:block;font-size:10px;color:#96a6b5}
+.dial-preview-data b{display:block;font-size:12px;color:#2c485e;margin-top:6px;overflow-wrap:anywhere}
+.dial-actions{display:flex;flex-wrap:wrap;gap:8px;padding:16px 22px;border-top:1px solid #e8eef1}.dial-preview-script,.dial-preview-history{padding:20px 22px;border-top:1px solid #e8eef1}
+.dial-preview-script{background:#effaf6}.dial-preview-script h3,.dial-preview-history h3{font:800 14px Manrope;margin:0 0 11px}.dial-preview-script p{white-space:pre-line;font-size:12px;line-height:1.7;color:#536c69}
+.dial-empty{font-size:12px;color:#8496a4;padding:25px}.dial-disclaimer{margin:20px 0}
+.dial-shade{position:fixed;inset:0;z-index:180;background:#111d31a8;display:flex;justify-content:center;align-items:center;padding:16px}
+.dial-modal{background:#f8fafb;border-radius:17px;box-shadow:0 20px 95px #07132466;width:min(1080px,100%);max-height:96vh;overflow-y:auto}
+.dial-modal-header{background:#fff;border-bottom:1px solid #e7edf2;padding:19px 25px;display:flex;justify-content:space-between;gap:12px}
+.dial-modal-header small{font-size:10px;letter-spacing:1.4px;color:#099b84;font-weight:800}.dial-modal-header h2{font:800 22px Manrope;margin:6px 0}
+.dial-modal-header p{font-size:11px;color:#8397a8;margin:0}.dial-header-right{display:flex;align-items:center;gap:14px}
+.dial-time{display:flex;flex-direction:column;gap:4px;text-align:center}.dial-time small{color:#8798a7;font-size:9px}.dial-time strong{font:800 22px Manrope;color:#0c9d82}
+.dial-close{border:0;background:#eff3f5;border-radius:10px;width:34px;height:34px;font-size:22px;color:#607c90;cursor:pointer}
+.dial-modal-grid{display:grid;grid-template-columns:minmax(280px,0.85fr) minmax(0,1.15fr)}.dial-modal-left{border-right:1px solid #e5edf1}
+.dial-contact{display:flex;align-items:center;gap:12px;padding:20px;background:#fff}.dial-contact>div:last-child{min-width:0}.dial-avatar{width:43px;height:43px;background:#dbf7eb;color:#0fa286;border-radius:12px;display:grid;place-items:center;font:800 21px Manrope}
+.dial-contact strong,.dial-contact span,.dial-contact small{display:block;overflow-wrap:anywhere}.dial-contact strong{font-size:14px;color:#283e52}
+.dial-contact span{font-size:11px;color:#8293a1;margin-top:5px}.dial-contact small{font-size:10px;color:#13a78a;margin-top:5px}
+.dial-session-controls{display:flex;gap:7px;flex-wrap:wrap;padding:13px 19px;border-bottom:1px solid #e8eef1}
+.dial-script,.dial-sidehistory{padding:20px}.dial-script{background:#eaf8f2}.dial-script h3,.dial-sidehistory h3{font:800 15px Manrope;margin:0}
+.dial-script-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.dial-script p{line-height:1.8;color:#3e6158;font-size:13px;white-space:pre-line}
+.dial-script textarea{width:100%;padding:12px;border-radius:8px;border:1px solid #b8dfd4}.dial-script form small{display:block;font-size:10px;color:#729b8f;margin:7px 0}
+.dial-modal-right{background:#fff;padding:22px}.dial-modal-right h3{font:800 15px Manrope;color:#254458;margin:0 0 17px}
+.dial-field{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;font-size:11px;color:#56718a;font-weight:800}
+.dial-field input,.dial-field textarea,.dial-field select{border:1px solid #d9e3eb;border-radius:9px;width:100%;background:#fff;padding:11px;color:#284053;font:500 12px "DM Sans"}
+.dial-form-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dial-form-section{padding-top:18px;margin-top:5px;border-top:1px solid #edf1f4}
+.dial-form-section h3{font-size:13px}.dial-stop{display:flex;gap:8px;font-size:11px;color:#a84646;align-items:center;padding:10px 0}
+.dial-savebuttons{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;border-top:1px solid #e9eff2;padding-top:16px}
+.dial-log{border-bottom:1px solid #edf2f4;padding:10px 0}.dial-log strong,.dial-log small{display:block}.dial-log strong{font-size:11px;color:#365061}
+.dial-log small{font-size:9px;color:#98a7b6;margin-top:4px}.dial-log p{font-size:11px;color:#688192;white-space:pre-line}
+@media(max-width:920px){.dial-work{grid-template-columns:1fr}.dial-scroller{max-height:330px}}
+@media(max-width:720px){.dial-shade{padding:0}.dial-modal{height:100dvh;max-height:100dvh;border-radius:0}.dial-modal-grid{grid-template-columns:1fr}.dial-modal-left{border-right:0}.dial-form-two{grid-template-columns:1fr}.dial-preview-data{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Two-stage softphone-style qualification panel */
+.dial-live-grid{grid-template-columns:minmax(280px,0.86fr) minmax(0,1.14fr)}
+.dial-qualify-col{padding:0;background:#fff;display:flex;flex-direction:column}
+.dial-calltabs{display:flex;overflow-x:auto;white-space:nowrap;border-bottom:1px solid #e2e9ef;padding:0 13px;gap:2px}
+.dial-calltabs button{padding:16px 10px;border:0;border-bottom:2px solid transparent;background:transparent;font-size:11px;color:#65788a;font-weight:800;cursor:pointer}
+.dial-calltabs button.active{color:#118c72;border-bottom-color:#12b998;background:#f4fcf8}
+.dial-qualify-form{padding:19px 24px;flex:1;min-height:235px}
+.dial-qualify-form h3{font:800 15px Manrope;color:#243e55;margin:0 0 17px}
+.dial-radio-row{display:flex;flex-wrap:wrap;gap:8px}
+.dial-radio{cursor:pointer;position:relative;min-width:120px;flex:1}
+.dial-radio input{position:absolute;opacity:0;width:1px;height:1px}
+.dial-radio span{display:block;text-align:center;font-size:11px!important;border:1px solid #d9e3e9;border-radius:8px;padding:11px 10px;color:#3e556b;background:#fff}
+.dial-radio input:checked+span{color:#0b856e;border-color:#17a88e;background:#e3f9f1;font-weight:800}
+.dial-radio input:focus-visible+span{outline:2px solid #08ae8b;outline-offset:2px}
+.dial-quick{border-top:1px solid #e9eff2;padding:15px 21px}
+.dial-quick h4{font-size:11px;font-weight:800;color:#75889a;margin:0 0 10px}
+.dial-quick>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.dial-quicktag{border:1px solid #dce6ec;background:#f7fafb;border-radius:8px;color:#52697f;cursor:pointer;min-height:42px;font-weight:700;font-size:10px;padding:7px}
+.dial-quicktag:hover{background:#eaf8f3;color:#0e8d72}
+.dial-qualification-footer{border-top:1px solid #e7edf1;background:#fff;padding:17px 22px;display:flex;justify-content:space-between;gap:12px;align-items:center}
+.dial-qualification-footer small{max-width:210px;font-size:10px;color:#94a5b2;line-height:1.6}
+.dial-script-in-session{position:relative;background:#f0faf6;border-bottom:1px solid #cbeadd}
+.dial-script-in-session select{border:1px solid #0f9b7e;border-radius:8px;padding:11px;width:100%;background:white;color:#25475b;margin:14px 0 5px;font-size:12px}
+.dial-script-in-session p{min-height:70px}.dial-script-copy{margin:10px 0 0}
+.dial-script-in-session form input,.dial-script-in-session form textarea{display:block;width:100%;border:1px solid #c4dad2;background:white;padding:10px;border-radius:8px;margin-top:6px;font-size:12px}
+.dial-script-in-session form label{font-size:11px;font-weight:700;color:#617d74;display:block;margin-top:12px}.dial-script-actions{display:flex;gap:6px;flex-wrap:wrap}
+.dial-modal-script{font-size:13px;line-height:1.8;white-space:pre-line;color:#436157}
+.dial-tip{font-size:11px;color:#8a99a8;line-height:1.6;margin:12px 0}
+.dial-final-mode{width:min(680px,100%)}
+.dial-finalize{background:white;padding:20px 25px 25px}
+.dial-finalize-head{display:flex;justify-content:space-between;align-items:start;gap:10px;border-bottom:1px solid #edf0f4;padding-bottom:14px;margin-bottom:19px}
+.dial-finalize-head h3{font:800 16px Manrope;margin:0 0 4px}.dial-finalize-head small{font-size:11px;color:#8798a5}
+.dial-finalize-form>.dial-field{margin-bottom:20px}
+.dial-result-tags{margin:16px 0 20px}.dial-result-tags>b{font-size:10px;color:#788b9b;display:block;margin-bottom:9px}
+.dial-result-tags>div{display:flex;gap:6px;flex-wrap:wrap}
+.dial-tag{border:1px solid #d6e2e8;color:#5d7283;background:white;border-radius:30px;padding:8px 11px;cursor:pointer;font-size:10px}
+.dial-tag.on{background:#e2f8ed;color:#0b836a;border-color:#1ab28c}
+.dial-finalize .dial-form-section{border-top:1px solid #e8f0f4;margin:17px 0;padding:15px 0 0}
+.dial-attachment{background:#f8fbfc;border:1px dashed #cbd9e4;border-radius:9px;padding:12px;margin:14px 0}
+.dial-recording-confirm{display:flex;align-items:center;gap:8px;font-size:11px;color:#6f8293;line-height:1.4;margin:11px 0}
+.dial-recording-confirm input{flex:0 0 auto}
+.dial-final-buttons{display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap;border-top:1px solid #ebf1f5;padding-top:15px;margin-top:17px}
+.dial-final-buttons .btn{font-size:10px}
+.dial-session-controls a.btn{max-width:100%}
+@media(max-width:720px){.dial-live-grid{grid-template-columns:1fr}.dial-quick>div{grid-template-columns:repeat(2,minmax(0,1fr))}.dial-finalize{padding:16px}.dial-final-buttons{justify-content:stretch}.dial-final-buttons .btn{flex:1;min-width:120px}}
