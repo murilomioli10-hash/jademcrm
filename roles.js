@@ -11,11 +11,22 @@ export function roleIdentity(){
  if(m)return 'GESTAO';
  return items('roster').find(x=>x.active&&x.owner_id!==uid&&val(x.member_email)===me())?.role||'GESTAO';
 }
+// tipos de usuário: GESTAO é o Admin (a conta dona dos dados)
+export const ROLE_LABEL={GESTAO:'Admin',SDR:'SDR',CLOSER:'Closer',CLIENTE:'Cliente',IA:'Escritório IA'};
+const ROLE_INFO={SDR:'Prospecção e agendamento. Vê só os leads distribuídos para ele.',CLOSER:'Reuniões e fechamento. Vê só os leads distribuídos para ele.',
+ CLIENTE:'A empresa que contratou a Mioli. Vê só o painel de números da operação dela, sem a lista de leads.',
+ IA:'O login das IAs do escritório (Jarvis, Secretária, Diretor Comercial, Eloá). Lê tudo; cria e altera leads, tarefas, reuniões e ligações; não apaga nada.'};
+export const roleLabel=r=>ROLE_LABEL[r||roleIdentity()]||r;
+const VIEWS={SDR:['sdr','leads','calendar','tasks','activities','settings','connect','send','warmup','callQueue'],
+ CLOSER:['closer','leads','calendar','tasks','activities','settings','deals','callQueue'],
+ CLIENTE:['cliente','settings'],
+ IA:['dashboard','clientOperations','companies','leads','people','deals','callQueue','tasks','calendar','activities','reports','notifications','settings']};
 export function roleCanView(v){
- const r=roleIdentity();if(r==='GESTAO')return true;
- return (r==='SDR'?['sdr','leads','calendar','tasks','activities','settings','connect','send','warmup','callQueue']:['closer','leads','calendar','tasks','activities','settings','deals','callQueue']).includes(v);
+ const r=roleIdentity();if(r==='GESTAO')return v!=='cliente';
+ return (VIEWS[r]||VIEWS.SDR).includes(v);
 }
-export function roleAutoView(){if(C.state.view==='dashboard')C.state.view=roleIdentity()==='SDR'?'sdr':roleIdentity()==='CLOSER'?'closer':'gestao'}
+export function roleHome(){const r=roleIdentity();return r==='SDR'?'sdr':r==='CLOSER'?'closer':r==='CLIENTE'?'cliente':r==='IA'?'leads':'gestao'}
+export function roleAutoView(){if(C.state.view==='dashboard'||!roleCanView(C.state.view))C.state.view=roleHome()}
 export function setupRoles(ctx){C=ctx;document.addEventListener('click',clicked);document.addEventListener('submit',submitted);document.addEventListener('change',changed)}
 function bounds(p){const today=new Date(),begin=new Date(today.getFullYear(),today.getMonth(),today.getDate());if(p==='week')begin.setDate(begin.getDate()-(begin.getDay()+6)%7);if(p==='month')begin.setDate(1);const end=new Date(begin);if(p==='day')end.setDate(end.getDate()+1);if(p==='week')end.setDate(end.getDate()+7);if(p==='month')end.setMonth(end.getMonth()+1);return [begin.getTime(),end.getTime()]}
 function scoped(m){
@@ -48,13 +59,43 @@ export function rolesView(mode){
  +'<div class="grid4">'+card('Leads da carteira',leadCount)+card('Reuniões agendadas',n.booked,periods[windowPeriod])+card('Realizadas',n.held,periods[windowPeriod])+card('Conversão',pct(n.conversion),'Ganhos / reuniões realizadas')+'</div>'
  +meetingRows(ms)+'<p class="note" style="margin-top:14px">Comparecimento = realizadas ÷ (realizadas + faltas). Conversão = reuniões realizadas com resultado ganho ÷ reuniões realizadas. Canceladas não contam como agendadas. Períodos no fuso do navegador.</p>';
 }
+let painel=null,painelCarregando=false;
+async function carregarPainel(){
+ painelCarregando=true;const r=await C.db.rpc('jadem_painel_cliente');painelCarregando=false;
+ painel=r.error?{erro:r.error.message}:(r.data||[]);C.render();
+}
+export function clientView(){
+ if(roleIdentity()!=='CLIENTE')return C.title('Acesso restrito','Este painel é dos usuários do tipo Cliente.');
+ if(!painel&&!painelCarregando)carregarPainel();
+ const topo=C.title('Painel da operação','Os números da sua operação com a Mioli Consultoria. Últimos 30 dias, exceto onde indicado.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>');
+ if(!painel)return topo+'<div class="card module"><p>Carregando os números…</p></div>';
+ if(painel.erro)return topo+'<div class="notice">Não foi possível carregar o painel: '+E(painel.erro)+'</div>';
+ if(!painel.length)return topo+'<div class="card module"><h2>Nenhuma operação liberada</h2><p>Seu acesso ainda não foi ligado a uma operação. Fale com a Mioli Consultoria.</p></div>';
+ const taxa=(a,b)=>b?Math.round(a/b*100)+'%':'—';
+ return topo+painel.map(o=>'<div class="sectionhead" style="padding:0 0 12px;border:0"><h2>'+E(o.operacao)+'</h2><span>'+E(o.situacao||'')+' · atualizado '+C.fmt(o.atualizado_em,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>'
+  +'<div class="grid4" style="margin-bottom:15px">'+card('Leads na operação',o.leads,o.leads_novos_30d+' novos em 30 dias')+card('Ligações',o.ligacoes_30d,o.ligacoes_7d+' nos últimos 7 dias')+card('Ligações atendidas',o.atendidas_30d,'Taxa de atendimento '+taxa(o.atendidas_30d,o.ligacoes_30d))+card('Próximas reuniões',o.proximas_reunioes,'Agendadas daqui para frente')+'</div>'
+  +'<div class="grid4" style="margin-bottom:15px">'+card('Reuniões agendadas',o.reunioes_agendadas_30d)+card('Reuniões realizadas',o.reunioes_realizadas_30d,'Comparecimento '+taxa(o.reunioes_realizadas_30d,o.reunioes_realizadas_30d+o.faltas_30d))+card('Faltas',o.faltas_30d)+card('Vendas',o.vendas_30d,'Conversão '+taxa(o.vendas_30d,o.reunioes_realizadas_30d))+'</div>'
+  +'<div class="card" style="margin-bottom:26px"><div class="sectionhead"><h2>Leads por etapa</h2></div><div class="cardbody">'+(Object.keys(o.leads_por_etapa||{}).length?Object.entries(o.leads_por_etapa).map(([k,n])=>'<div class="settingsrow"><div><strong>'+E(k)+'</strong></div><b>'+E(n)+'</b></div>').join(''):'<p class="note">Ainda sem leads.</p>')+'</div></div>').join('')
+  +'<p class="note">Você vê só os números consolidados. Os dados dos contatos ficam com a equipe da Mioli.</p>';
+}
+const opName=id=>items('clientOperations').find(o=>o.id===id)?.name||'—';
+// cartão de Usuários nas Configurações (só o Admin)
+export function usersCard(){
+ if(roleIdentity()!=='GESTAO')return '';
+ const uid=C.state.user.id,people=items('roster').filter(x=>x.owner_id===uid&&val(x.member_email)!==me());
+ const tipos=['SDR','CLOSER','CLIENTE','IA'];
+ return '<div class="card" style="margin-top:18px"><div class="sectionhead"><h2>Usuários e acessos</h2><div class="flexrow"><button class="btn outline sm" data-role="team">'+C.ic('users')+' Equipe e distribuição</button><button class="btn primary sm" data-role="new">'+C.ic('plus')+' Adicionar usuário</button></div></div>'
+ +'<div class="cardbody"><div class="grid4" style="margin-bottom:8px">'+tipos.map(t=>'<div><strong style="font-size:12px;color:#27384e">'+E(ROLE_LABEL[t])+' · '+people.filter(x=>x.role===t&&x.active).length+'</strong><p class="note" style="margin:6px 0 0">'+E(ROLE_INFO[t])+'</p></div>').join('')+'</div>'
+ +(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Operação</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+C.badge(ROLE_LABEL[r.role]||r.role)+'</td><td>'+E(r.role==='CLIENTE'?opName(r.operation_id):'—')+'</td><td><button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button></td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum usuário adicionado ainda.</div>')
+ +'<p class="note" style="margin-top:12px">A pessoa entra no JADEM com uma conta do mesmo e-mail cadastrado aqui (se ainda não tem, ela usa Criar conta). Cadastre o e-mail aqui só depois que a pessoa criar a conta.</p></div></div>';
+}
 export function teamView(){
  if(roleIdentity()!=='GESTAO')return C.title('Equipe','Apenas Gestão pode gerenciar colaboradores.');
  const uid=C.state.user.id,people=items('roster').filter(x=>x.owner_id===uid),assigned=items('assignments').filter(x=>x.owner_id===uid);
  return C.title('Gestão de equipe','Colaboradores e distribuição de leads por responsável.','<button class="btn primary" data-role="new">'+C.ic('plus')+' Adicionar usuário</button>')
  +'<div class="notice">Adicione o e-mail do colaborador. Ele precisa criar sua conta no JADEM com esse e-mail; esta tela não envia convites automaticamente. SDR e Closer visualizam apenas os leads atribuídos.</div>'
  +'<div class="grid4" style="margin-bottom:18px">'+card('Colaboradores',people.filter(x=>x.active).length)+card('SDRs',people.filter(x=>x.role==='SDR'&&x.active).length)+card('Closers',people.filter(x=>x.role==='CLOSER'&&x.active).length)+card('Distribuições',assigned.length)+'</div>'
- +'<div class="card"><div class="sectionhead"><h2>Equipe</h2></div>'+(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+E(r.role)+'</td><td>'+((val(r.member_email)===me()&&r.role==='GESTAO')?'Gestor principal':'<button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button>')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum colaborador adicionado.</div>')+'</div>'
+ +'<div class="card"><div class="sectionhead"><h2>Equipe</h2></div>'+(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+E(ROLE_LABEL[r.role]||r.role)+(r.role==='CLIENTE'?' · '+E(opName(r.operation_id)):'')+'</td><td>'+((val(r.member_email)===me()&&r.role==='GESTAO')?'Gestor principal':'<button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button>')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum colaborador adicionado.</div>')+'</div>'
  +'<div class="card" style="margin-top:18px"><div class="sectionhead"><h2>Atribuição de leads</h2></div>'+
  (items('leads').filter(x=>x.owner_id===uid).length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Empresa</th><th>SDR</th><th>Closer</th><th>Ação</th></tr></thead><tbody>'+
  items('leads').filter(x=>x.owner_id===uid).map(l=>'<tr><td>'+E(l.company_name)+'</td><td>'+E(assigned.find(x=>x.lead_id===l.id&&x.role==='SDR')?.assigned_email||'—')+'</td><td>'+E(assigned.find(x=>x.lead_id===l.id&&x.role==='CLOSER')?.assigned_email||'—')+'</td><td><button class="btn outline sm" data-role="assign:'+l.id+'">Distribuir</button></td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Cadastre leads para fazer a distribuição.</div>')+'</div>';
@@ -63,7 +104,10 @@ export function teamButton(l){return C&&roleIdentity()==='GESTAO'&&l.owner_id===
 export function rolesOverlay(){
  if(!modal)return '';
  let fields='',title='';
- if(modal.type==='new'){title='Novo colaborador';fields=C.inp('display_name','Nome','','text',true,true)+C.inp('member_email','E-mail','','email',true,true)+C.sel('role','Função',[['SDR','SDR — agendamento'],['CLOSER','Closer — fechamento']],'SDR',true)}
+ if(modal.type==='new'){title='Novo usuário';const ops=items('clientOperations').filter(o=>o.owner_id===C.state.user.id).map(o=>[o.id,o.name]);
+ fields=C.inp('display_name','Nome','','text',true,true)+C.inp('member_email','E-mail','','email',true,true)+C.sel('role','Tipo de usuário',[['SDR','SDR — prospecção e agendamento'],['CLOSER','Closer — fechamento'],['CLIENTE','Cliente — painel de números da operação'],['IA','Escritório IA — login das IAs do escritório']],'SDR',true)
+ +C.sel('operation_id','Operação (obrigatória para Cliente)',ops,'',true)
+ +'<p class="note" style="grid-column:1/-1;margin:0">'+(ops.length?'':'Para criar um usuário Cliente, cadastre antes a operação em Operações dos Clientes. ')+'SDR, Closer e Escritório IA ignoram a operação.</p>'}
  else{
  const lead=items('leads').find(x=>x.id===modal.id);if(!lead)return '';
  title='Distribuir: '+lead.company_name;
@@ -82,7 +126,10 @@ async function submitted(e){
  if(modal.type==='new'){
   const mail=val(v.member_email);if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)||mail===me())throw Error('E-mail inválido ou já é gestor.');
   if(!items('roster').some(x=>x.owner_id===uid&&val(x.member_email)===me())){const x=await C.db.from('jadem_team_roster').insert({owner_id:uid,member_email:me(),display_name:'Gestor principal',role:'GESTAO'});if(x.error&&x.error.code!=='23505')throw x.error}
-  const x=await C.db.from('jadem_team_roster').insert({owner_id:uid,member_email:mail,display_name:v.display_name.trim(),role:v.role});if(x.error)throw x.error;
+  if(!ROLE_LABEL[v.role]||v.role==='GESTAO')throw Error('Escolha o tipo de usuário.');
+  if(v.role==='CLIENTE'&&!v.operation_id)throw Error('Escolha a operação do cliente.');
+  if(items('roster').some(x=>x.owner_id===uid&&val(x.member_email)===mail))throw Error('Este e-mail já está na equipe. Desative e ative pela lista, se precisar.');
+  const x=await C.db.from('jadem_team_roster').insert({owner_id:uid,member_email:mail,display_name:v.display_name.trim(),role:v.role,operation_id:v.role==='CLIENTE'?v.operation_id:null});if(x.error)throw x.error;
  }else{
   const lead=items('leads').find(x=>x.id===modal.id);if(!lead||lead.owner_id!==uid)throw Error('Sem acesso ao lead');
   for(const [role,key] of [['SDR','sdr'],['CLOSER','closer']]){
@@ -111,6 +158,7 @@ async function clicked(e){
  const b=e.target.closest('[data-role]');if(!b)return;const action=b.dataset.role;
  if(action==='close'){modal=null;C.render();return}
  if(action==='team'||action==='calendar'){C.state.view=action;C.render();return}
+ if(action==='painel'){painel=null;C.render();return}
  if(roleIdentity()!=='GESTAO')return;
  if(action==='new'){modal={type:'new'};C.render()}
  else if(action.startsWith('assign:')){modal={type:'assign',id:action.split(':')[1]};C.render()}
