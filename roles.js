@@ -52,7 +52,7 @@ export function rolesView(mode){
  const ms=scoped(mode),n=numbers(ms,windowPeriod),uid=C.state.user.id;
  const leadCount=items('leads').filter(l=>mode==='GESTAO'?l.owner_id===uid:items('assignments').some(a=>a.lead_id===l.id&&a.role===mode&&val(a.assigned_email)===me())).length;
  const switcher=roleIdentity()==='GESTAO'?'<div class="role-tabs">'+[['GESTAO','Gestão'],['SDR','SDR'],['CLOSER','Closer']].map(([key,name])=>'<button class="role-tab '+(key===mode?'on':'')+'" data-role-go="'+key+'">'+name+'</button>').join('')+'</div>':'';
- return C.title(mode==='GESTAO'?'Gestão comercial':mode==='SDR'?'Painel do SDR':'Painel do Closer',
+ return C.title((mode==='GESTAO'?'Gestão comercial':mode==='SDR'?'Painel do SDR':'Painel do Closer')+(C.opAtiva()?' · '+C.opAtiva():''),
  mode==='GESTAO'?'Indicadores da operação, distribuição e performance.':mode==='SDR'?'Leads, prospecção e agendamentos.':'Reuniões, comparecimento e fechamento.',
  mode==='GESTAO'?'<button class="btn primary" data-role="team">'+C.ic('users')+' Equipe</button>':'<button class="btn primary" data-role="calendar">'+C.ic('calendar')+' Agenda</button>')
  +switcher+summary(ms)+'<div class="role-period">Período em destaque <select id="rolePeriod">'+Object.keys(periods).map(x=>'<option value="'+x+'" '+(x===windowPeriod?'selected':'')+'>'+periods[x]+'</option>').join('')+'</select></div>'
