@@ -179,9 +179,10 @@ async function clicked(e){
  else if(action.startsWith('assign:')){modal={type:'assign',id:action.split(':')[1]};C.render()}
  else if(action.startsWith('senha:')){
   const x=items('roster').find(z=>z.id===action.split(':')[1]);if(!x)return;
-  if(!confirm('Gerar uma senha nova para '+x.member_email+'? A senha atual dela deixa de funcionar.'))return;
+  if(!confirm('Gerar uma senha temporária para '+x.member_email+'? Se ela já tinha senha, a antiga deixa de funcionar.'))return;
   b.disabled=true;
-  try{const j=await contas('resetar',val(x.member_email));modal={type:'senha',email:j.email,senha:j.senha};C.render()}
+  // quem foi adicionado antes da criação automática ainda não tem conta: cria agora
+  try{let j=await contas('criar',val(x.member_email),x.display_name||'');if(!j.senha)j=await contas('resetar',val(x.member_email));modal={type:'senha',email:j.email,senha:j.senha};C.render()}
   catch(err){C.toast(err.message)}finally{b.disabled=false}
  }
  else if(action.startsWith('toggle:')){
