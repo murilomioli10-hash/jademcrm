@@ -86,14 +86,14 @@ export function usersCard(){
  const tipos=['SDR','CLOSER','CLIENTE','IA'];
  return '<div class="card" style="margin-top:18px"><div class="sectionhead"><h2>Usuários e acessos</h2><div class="flexrow"><button class="btn outline sm" data-role="team">'+C.ic('users')+' Equipe e distribuição</button><button class="btn primary sm" data-role="new">'+C.ic('plus')+' Adicionar usuário</button></div></div>'
  +'<div class="cardbody"><div class="grid4" style="margin-bottom:8px">'+tipos.map(t=>'<div><strong style="font-size:12px;color:#27384e">'+E(ROLE_LABEL[t])+' · '+people.filter(x=>x.role===t&&x.active).length+'</strong><p class="note" style="margin:6px 0 0">'+E(ROLE_INFO[t])+'</p></div>').join('')+'</div>'
- +(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Operação</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+C.badge(ROLE_LABEL[r.role]||r.role)+'</td><td>'+E(r.role==='CLIENTE'?opName(r.operation_id):'—')+'</td><td><button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button></td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum usuário adicionado ainda.</div>')
- +'<p class="note" style="margin-top:12px">A pessoa entra no JADEM com uma conta do mesmo e-mail cadastrado aqui (se ainda não tem, ela usa Criar conta). Cadastre o e-mail aqui só depois que a pessoa criar a conta.</p></div></div>';
+ +(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Operação</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+C.badge(ROLE_LABEL[r.role]||r.role)+'</td><td>'+E(r.role==='CLIENTE'?opName(r.operation_id):'—')+'</td><td><div class="flexrow"><button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button><button class="btn outline sm" data-role="senha:'+r.id+'">Nova senha</button></div></td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum usuário adicionado ainda.</div>')
+ +'<p class="note" style="margin-top:12px">Ao adicionar, o JADEM cria a conta com uma senha temporária e mostra a senha para você enviar à pessoa. No primeiro acesso ela troca por uma senha dela. Se a pessoa já tinha conta, ela só é adicionada e continua com a senha dela.</p></div></div>';
 }
 export function teamView(){
  if(roleIdentity()!=='GESTAO')return C.title('Equipe','Apenas Gestão pode gerenciar colaboradores.');
  const uid=C.state.user.id,people=items('roster').filter(x=>x.owner_id===uid),assigned=items('assignments').filter(x=>x.owner_id===uid);
  return C.title('Gestão de equipe','Colaboradores e distribuição de leads por responsável.','<button class="btn primary" data-role="new">'+C.ic('plus')+' Adicionar usuário</button>')
- +'<div class="notice">Adicione o e-mail do colaborador. Ele precisa criar sua conta no JADEM com esse e-mail; esta tela não envia convites automaticamente. SDR e Closer visualizam apenas os leads atribuídos.</div>'
+ +'<div class="notice">Ao adicionar um usuário, o JADEM cria a conta com uma senha temporária para você enviar; no primeiro acesso a pessoa troca. SDR e Closer visualizam apenas os leads atribuídos.</div>'
  +'<div class="grid4" style="margin-bottom:18px">'+card('Colaboradores',people.filter(x=>x.active).length)+card('SDRs',people.filter(x=>x.role==='SDR'&&x.active).length)+card('Closers',people.filter(x=>x.role==='CLOSER'&&x.active).length)+card('Distribuições',assigned.length)+'</div>'
  +'<div class="card"><div class="sectionhead"><h2>Equipe</h2></div>'+(people.length?'<div class="tablewrap"><table class="datatable"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Ativo</th></tr></thead><tbody>'+people.map(r=>'<tr><td>'+E(r.display_name||'—')+'</td><td>'+E(r.member_email)+'</td><td>'+E(ROLE_LABEL[r.role]||r.role)+(r.role==='CLIENTE'?' · '+E(opName(r.operation_id)):'')+'</td><td>'+((val(r.member_email)===me()&&r.role==='GESTAO')?'Gestor principal':'<button class="btn outline sm" data-role="toggle:'+r.id+'">'+(r.active?'Sim · Desativar':'Não · Ativar')+'</button>')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum colaborador adicionado.</div>')+'</div>'
  +'<div class="card" style="margin-top:18px"><div class="sectionhead"><h2>Atribuição de leads</h2></div>'+
@@ -101,8 +101,19 @@ export function teamView(){
  items('leads').filter(x=>x.owner_id===uid).map(l=>'<tr><td>'+E(l.company_name)+'</td><td>'+E(assigned.find(x=>x.lead_id===l.id&&x.role==='SDR')?.assigned_email||'—')+'</td><td>'+E(assigned.find(x=>x.lead_id===l.id&&x.role==='CLOSER')?.assigned_email||'—')+'</td><td><button class="btn outline sm" data-role="assign:'+l.id+'">Distribuir</button></td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Cadastre leads para fazer a distribuição.</div>')+'</div>';
 }
 export function teamButton(l){return C&&roleIdentity()==='GESTAO'&&l.owner_id===C.state.user.id?'<button class="btn outline sm" data-role="assign:'+l.id+'">Distribuir SDR / Closer</button>':''}
+// cria a conta (ou gera senha nova) pela função jadem-usuarios do Supabase
+async function contas(acao,email,nome){
+ const r=await C.db.functions.invoke('jadem-usuarios',{body:{acao,email,nome}});
+ let j=r.data;if(r.error){try{j=await r.error.context?.json()}catch(e){}}
+ if(!j||!j.ok)throw Error(j?.erro||r.error?.message||'Não foi possível criar a conta.');
+ return j;
+}
 export function rolesOverlay(){
  if(!modal)return '';
+ if(modal.type==='senha')return '<div class="featureoverlay"><div class="featuremodal"><div class="featureheader"><h2>Senha temporária</h2><button class="btn neutral sm" data-role="close">Fechar</button></div><div class="featurebody">'
+  +'<p>Envie para <strong>'+E(modal.email)+'</strong> o endereço do JADEM e esta senha. No primeiro acesso o JADEM pede para trocar por uma senha da pessoa.</p>'
+  +'<div class="flexrow" style="margin:16px 0"><code style="font:800 22px ui-monospace,Consolas,monospace;letter-spacing:2px;background:#f1f5f9;border-radius:10px;padding:12px 16px;user-select:all">'+E(modal.senha)+'</code><button class="btn primary sm" data-role="copiar">Copiar</button></div>'
+  +'<p class="note">Esta senha não aparece de novo. Se perder, use "Nova senha" na lista de usuários.</p></div></div></div>';
  let fields='',title='';
  if(modal.type==='new'){title='Novo usuário';const ops=items('clientOperations').filter(o=>o.owner_id===C.state.user.id).map(o=>[o.id,o.name]);
  fields=C.inp('display_name','Nome','','text',true,true)+C.inp('member_email','E-mail','','email',true,true)+C.sel('role','Tipo de usuário',[['SDR','SDR — prospecção e agendamento'],['CLOSER','Closer — fechamento'],['CLIENTE','Cliente — painel de números da operação'],['IA','Escritório IA — login das IAs do escritório']],'SDR',true)
@@ -122,13 +133,14 @@ async function submitted(e){
  const btn=e.target.querySelector('[type=submit]');btn.disabled=true;
  try{
  if(roleIdentity()!=='GESTAO')throw Error('Sem permissão');
- const v=Object.fromEntries(new FormData(e.target).entries()),uid=C.state.user.id;
+ const v=Object.fromEntries(new FormData(e.target).entries()),uid=C.state.user.id;let conta=null;
  if(modal.type==='new'){
   const mail=val(v.member_email);if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)||mail===me())throw Error('E-mail inválido ou já é gestor.');
   if(!items('roster').some(x=>x.owner_id===uid&&val(x.member_email)===me())){const x=await C.db.from('jadem_team_roster').insert({owner_id:uid,member_email:me(),display_name:'Gestor principal',role:'GESTAO'});if(x.error&&x.error.code!=='23505')throw x.error}
   if(!ROLE_LABEL[v.role]||v.role==='GESTAO')throw Error('Escolha o tipo de usuário.');
   if(v.role==='CLIENTE'&&!v.operation_id)throw Error('Escolha a operação do cliente.');
   if(items('roster').some(x=>x.owner_id===uid&&val(x.member_email)===mail))throw Error('Este e-mail já está na equipe. Desative e ative pela lista, se precisar.');
+  conta=await contas('criar',mail,v.display_name.trim());
   const x=await C.db.from('jadem_team_roster').insert({owner_id:uid,member_email:mail,display_name:v.display_name.trim(),role:v.role,operation_id:v.role==='CLIENTE'?v.operation_id:null});if(x.error)throw x.error;
  }else{
   const lead=items('leads').find(x=>x.id===modal.id);if(!lead||lead.owner_id!==uid)throw Error('Sem acesso ao lead');
@@ -140,7 +152,9 @@ async function submitted(e){
    if(q){const r=await q;if(r.error)throw r.error}
   }
  }
- modal=null;await C.load();C.toast('Equipe salva.');
+ const novo=modal.type==='new'?conta:null;
+ modal=novo&&novo.senha?{type:'senha',email:novo.email,senha:novo.senha}:null;await C.load();
+ C.toast(novo&&novo.existe?'Essa pessoa já tinha conta: foi adicionada e entra com a senha dela.':'Equipe salva.');
  }catch(err){C.toast(err.message||'Falha ao salvar');console.warn(err)}finally{btn.disabled=false}
 }
 async function changed(e){
@@ -159,9 +173,17 @@ async function clicked(e){
  if(action==='close'){modal=null;C.render();return}
  if(action==='team'||action==='calendar'){C.state.view=action;C.render();return}
  if(action==='painel'){painel=null;C.render();return}
+ if(action==='copiar'&&modal?.senha){try{await navigator.clipboard.writeText(modal.senha);C.toast('Senha copiada.')}catch(e){C.toast('Selecione a senha e copie.')}return}
  if(roleIdentity()!=='GESTAO')return;
  if(action==='new'){modal={type:'new'};C.render()}
  else if(action.startsWith('assign:')){modal={type:'assign',id:action.split(':')[1]};C.render()}
+ else if(action.startsWith('senha:')){
+  const x=items('roster').find(z=>z.id===action.split(':')[1]);if(!x)return;
+  if(!confirm('Gerar uma senha nova para '+x.member_email+'? A senha atual dela deixa de funcionar.'))return;
+  b.disabled=true;
+  try{const j=await contas('resetar',val(x.member_email));modal={type:'senha',email:j.email,senha:j.senha};C.render()}
+  catch(err){C.toast(err.message)}finally{b.disabled=false}
+ }
  else if(action.startsWith('toggle:')){
   const x=items('roster').find(z=>z.id===action.split(':')[1]);if(!x||val(x.member_email)===me())return;
   const r=await C.db.from('jadem_team_roster').update({active:!x.active}).eq('id',x.id);if(r.error)C.toast(r.error.message);else await C.load();
