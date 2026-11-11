@@ -507,7 +507,7 @@ function importOverlay(){
  const opcoesCampo=v=>'<option value="">— ignorar coluna —</option>'+IMP.CAMPOS.map(([c,rot])=>'<option value="'+c+'" '+(v===c?'selected':'')+'>'+e(rot)+'</option>').join('');
  const semEmpresa=!Object.values(im.mapa).some(c=>c==='company_name'||c==='trade_name');
  return head('Importar '+im.nome)
- +'<div class="notice">'+im.linhas.length+' linha(s) e '+im.cabecalhos.length+' coluna(s). Confira para onde vai cada coluna; colunas ignoradas não são gravadas. Nada que já existe é apagado: leads repetidos só recebem os dados que faltam.</div>'
+ +'<div class="notice">'+im.linhas.length+' linha(s) e '+im.cabecalhos.length+' coluna(s). Cada lead novo também entra no Funil de vendas, na coluna Novo. Confira para onde vai cada coluna; colunas ignoradas não são gravadas. Nada que já existe é apagado: leads repetidos só recebem os dados que faltam.</div>'
  +'<div class="formgrid" style="margin-bottom:14px"><div class="field wide"><label>Operação comercial (cliente) *</label><select data-imp-op>'+(temOps?'<option value="">Selecione…</option>':'<option value="">Sem operação</option>')+opsAll().map(o=>'<option value="'+e(o.id)+'" '+(im.op===o.id?'selected':'')+'>'+e(o.name)+'</option>').join('')+'</select></div></div>'
  +'<div class="tablewrap" style="max-height:42vh"><table class="datatable"><thead><tr><th>Coluna da planilha</th><th>Exemplo</th><th>Vai para</th></tr></thead><tbody>'
  +im.cabecalhos.map((h,i)=>'<tr><td><strong>'+e(h)+'</strong></td><td class="muted">'+e(exemplo(h).slice(0,70))+'</td><td><select data-imp-map="'+i+'">'+opcoesCampo(im.mapa[h])+'</select></td></tr>').join('')+'</tbody></table></div>'
@@ -523,7 +523,7 @@ async function importRun(){
  const rel=plano.relatorio,byLinha=new Map(rel.map(x=>[x.linha,x]));
  const op=im.op||null,cfgOp=Q.configDa(opsAll().find(o=>o.id===op));
  feature.importBusy=true;im.fase='executando';C.render();
- let novos=0,atual=0;const eventos=[];
+ let novos=0,atual=0,negocios=0,avisoNegocio='';const eventos=[];
  const prepara=it=>{
   const l={...it.lead,operation_id:op,interest:'Não avaliado',stage_note:'Importação: '+im.nome};
   if(l.status===Q.GANHO){l.status='Negociação';byLinha.get(it.linha).motivo=(byLinha.get(it.linha).motivo?byLinha.get(it.linha).motivo+'; ':'')+'etapa "ganho" exige condição de fechamento: entrou como Negociação'}
@@ -534,17 +534,22 @@ async function importRun(){
   for(let i=0;i<plano.novos.length;i+=50){
    const lote=plano.novos.slice(i,i+50);
    im.progresso='novos '+Math.min(i+50,plano.novos.length)+' de '+plano.novos.length;C.render();
-   let {data,error}=await C.db.from('jadem_leads').insert(lote.map(prepara)).select('id');
+   let {data,error}=await C.db.from('jadem_leads').insert(lote.map(prepara)).select('id,company_name,trade_name,estimated_value,operation_id');
    if(error){   // um registro ruim derruba o lote: grava um a um para saber qual
     data=[];
     for(const it of lote){
-     const r=await C.db.from('jadem_leads').insert(prepara(it)).select('id').single();
+     const r=await C.db.from('jadem_leads').insert(prepara(it)).select('id,company_name,trade_name,estimated_value,operation_id').single();
      if(r.error){const x=byLinha.get(it.linha);x.resultado='rejeitado';x.motivo=(r.error.code==='23505'?'CNPJ já cadastrado nesta operação':r.error.message)}
      else data.push(r.data);
     }
    }
    novos+=(data||[]).length;
    (data||[]).forEach(x=>eventos.push({lead_id:x.id,action:'importou',detail:'Importação '+im.nome}));
+   // todo lead importado entra no Funil de vendas, na coluna Novo
+   if((data||[]).length){
+    const r=await C.db.from('jadem_deals').insert(data.map(x=>({title:(x.trade_name||x.company_name).slice(0,200),stage:'Novo',amount:Number(x.estimated_value)||0,operation_id:x.operation_id||null,lead_id:x.id})));
+    if(r.error)avisoNegocio=r.error.message;else negocios+=data.length;
+   }
   }
   const existentes=new Map(((C.state.rawData||C.state.data).leads||[]).map(l=>[l.id,l]));
   for(let i=0;i<plano.atualizacoes.length;i++){
@@ -560,7 +565,7 @@ async function importRun(){
   // confere no banco: os CNPJs importados estão lá, na operação certa
   const cnpjs=plano.novos.map(n=>n.lead.cnpj).filter(Boolean);
   const gravados=((C.state.rawData||C.state.data).leads||[]).filter(l=>(l.operation_id||null)===op&&cnpjs.includes(l.cnpj)).length;
-  im.conferido=novos+' novo(s) e '+atual+' atualizado(s) gravados'+(cnpjs.length?'; '+gravados+' de '+cnpjs.length+' CNPJs encontrados na operação':'');
+  im.conferido=novos+' novo(s) e '+atual+' atualizado(s) gravados; '+negocios+' no Funil de vendas (Novo)'+(avisoNegocio?' — negócios não criados: '+avisoNegocio:'')+(cnpjs.length?'; '+gravados+' de '+cnpjs.length+' CNPJs encontrados na operação':'');
   im.relatorio=rel;im.fase='relatorio';
   C.toast(novos+' lead(s) importado(s), '+atual+' completado(s).');
  }catch(err){
