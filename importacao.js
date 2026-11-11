@@ -16,10 +16,11 @@ export const chave = v => semAcento(v).replace(/[^a-z0-9]/g, '');
 /* ---------------- colunas reconhecidas ---------------- */
 // campo -> nomes de coluna aceitos (comparados sem acento, sem espaço e sem pontuação)
 export const CAMPOS = [
-  ['company_name', 'Razão social', ['razaosocial', 'nomeempresarial', 'empresa', 'nomedaempresa', 'nomeempresa', 'company', 'empresanome', 'razao']],
+  // a ordem dos nomes é a preferência: com "Razão social" e "Empresa" na mesma planilha, vale a razão social
+  ['company_name', 'Razão social', ['razaosocial', 'nomeempresarial', 'razao', 'nomedaempresa', 'empresa', 'nomeempresa', 'company', 'empresanome']],
   ['trade_name', 'Nome fantasia', ['nomefantasia', 'fantasia', 'nomecomercial']],
   ['cnpj', 'CNPJ', ['cnpj', 'cnpjcompleto', 'numerocnpj', 'nrcnpj', 'documento', 'cnpjcpf']],
-  ['cnae', 'CNAE principal (código)', ['cnae', 'cnaeprincipal', 'cnaefiscal', 'codigocnae', 'cnaecodigo', 'cnaefiscalprincipal', 'codigoatividadeprincipal', 'cnaeprincipalcodigo']],
+  ['cnae', 'CNAE principal (código)', ['cnae', 'codcnae', 'codigodocnae', 'cnaeprincipal', 'cnaefiscal', 'codigocnae', 'cnaecodigo', 'cnaefiscalprincipal', 'codigoatividadeprincipal', 'cnaeprincipalcodigo']],
   ['cnae_description', 'CNAE (descrição)', ['descricaocnae', 'cnaedescricao', 'atividadeprincipal', 'descricaoatividadeprincipal', 'cnaeprincipaldescricao', 'descricaodaatividade']],
   ['legal_nature', 'Natureza jurídica', ['naturezajuridica', 'natureza']],
   ['segment', 'Segmento', ['segmento', 'ramo', 'setor', 'ramodeatividade', 'atividade']],
@@ -33,34 +34,49 @@ export const CAMPOS = [
   ['state', 'Estado (UF)', ['uf', 'estado', 'siglauf']],
   ['website', 'Site', ['site', 'website', 'url', 'homepage', 'sitedaempresa']],
   ['origin', 'Origem do lead', ['origem', 'fonte', 'canal', 'origemdolead']],
-  ['contact_name', 'Nome do contato', ['contato', 'nomedocontato', 'nomecontato', 'responsavel', 'pessoa', 'decisor', 'nomedecisor', 'socio', 'nomesocio']],
-  ['position', 'Cargo', ['cargo', 'funcao', 'posicao', 'qualificacaosocio', 'qualificacao']],
+  ['contact_name', 'Nome do contato', ['contato', 'nomedocontato', 'nomecontato', 'pessoa', 'pessoadecontato']],
+  ['position', 'Cargo do contato', ['cargo', 'funcao', 'posicao', 'cargodocontato']],
+  ['decisor_name', 'Decisor / sócios', ['socios', 'socio', 'nomesocio', 'nomesocios', 'quadrosocietario', 'qsa', 'decisor', 'nomedecisor', 'nomedodecisor']],
+  ['decisor_position', 'Cargo do decisor', ['cargodecisor', 'cargododecisor', 'qualificacaosocio', 'qualificacao']],
+  ['decisor_status', 'Situação do decisor', ['decisoridentificado', 'situacaododecisor', 'statusdecisor']],
   ['phone', 'Telefone', ['telefone', 'fone', 'tel', 'telefonecomercial', 'telefoneprincipal', 'celular', 'dddtelefone', 'telefonefixo', 'contatotelefonico', 'telefones']],
   ['ddd', 'DDD', ['ddd']],
   ['whatsapp', 'WhatsApp', ['whatsapp', 'whats', 'zap', 'wpp', 'whatsappcomercial']],
   ['email', 'E-mail', ['email', 'mail', 'correioeletronico', 'emailcomercial', 'emails', 'enderecoeletronico']],
-  ['notes', 'Observações', ['observacoes', 'observacao', 'obs', 'notas', 'informacoes', 'comentarios', 'anotacoes']],
+  // observações: várias colunas viram uma nota, cada uma com o nome da coluna
+  ['notes', 'Observações', ['observacoes', 'observacao', 'obs', 'notas', 'informacoes', 'comentarios', 'anotacoes', 'icppreliminar',
+    'alertas', 'alerta', 'validacao', 'proximaacao', 'proximopasso', 'instagram', 'linkedin', 'facebook', 'redessociais']],
   ['estimated_value', 'Valor potencial', ['valor', 'valorprevisto', 'ticket', 'valorpotencial']],
-  ['status', 'Etapa do funil', ['etapa', 'etapadofunil', 'estagio', 'fase']],
+  ['status', 'Etapa do funil', ['etapa', 'etapadofunil', 'estagio', 'fase', 'statuscomercial', 'etapacomercial']],
 ];
 export const ROTULO = Object.fromEntries(CAMPOS.map(([c, r]) => [c, r]));
 const MULTIPLOS = new Set(['phone', 'email', 'notes', 'ddd', 'whatsapp']);
 export const campoMultiplo = c => MULTIPLOS.has(c);
 
-/** coluna -> campo, pelo nome. "Telefone 2", "telefone_2" e "Fone2" viram telefone. */
+// "Telefone 1 E164", "E-mail informado", "Sócios informados" -> telefone, email, socios
+const SUFIXOS = /(informad[oa]s?|e164|principal|completo|encontrad[oa]s?|validad[oa]s?)$/;
+function nomesPossiveis(h) {
+  let k = chave(h); const out = [k];
+  for (let i = 0; i < 4; i++) { const n = k.replace(SUFIXOS, '').replace(/\d+$/, ''); if (n === k || !n) break; k = n; out.push(k); }
+  return out;
+}
+/** coluna -> campo, pelo nome. Quando duas colunas disputam um campo simples, vence o nome mais preferido. */
 export function autoMapear(cabecalhos) {
-  const usados = new Set(), mapa = {};
+  const mapa = {}, melhor = {};   // campo -> {h, rank}
   for (const h of cabecalhos) {
-    const k = chave(h), semNum = k.replace(/\d+$/, '');
-    let achou = '';
+    const nomes = nomesPossiveis(h);
+    let achou = '', rank = 99;
     for (const [campo, , aliases] of CAMPOS) {
-      if (aliases.includes(k) || aliases.includes(semNum)) { achou = campo; break; }
+      const i = Math.min(...nomes.map(n => aliases.indexOf(n)).filter(x => x >= 0));
+      if (Number.isFinite(i)) { achou = campo; rank = i; break; }
     }
-    if (!achou && /^ddd\d*telefone\d*$|^telefone\d*ddd\d*$/.test(k)) achou = 'phone';
-    // campos simples ficam só com a primeira coluna que bate; repetidos ficam sem mapear
-    if (achou && !MULTIPLOS.has(achou) && usados.has(achou)) achou = '';
-    if (achou) usados.add(achou);
+    if (!achou && /^ddd\d*telefone\d*$|^telefone\d*ddd\d*$/.test(chave(h))) achou = 'phone';
     mapa[h] = achou;
+    if (achou && !MULTIPLOS.has(achou)) {
+      const atual = melhor[achou];
+      if (!atual || rank < atual.rank) { if (atual) mapa[atual.h] = ''; melhor[achou] = { h, rank }; }
+      else mapa[h] = '';
+    }
   }
   return mapa;
 }
@@ -137,19 +153,20 @@ export function numeroValor(v) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+const DECISOR_SITUACOES = ['Não identificado', 'Identificado', 'Contato estabelecido', 'Autoridade confirmada'];
 const DECISOR_CARGO = /socio|administrador|proprietari|diretor|ceo|dono|presidente|fundador|titular|responsavel tecnico|medico responsavel/;
 const vazio = v => v == null || txt(v) === '' || (Array.isArray(v) && !v.length);
 
 /* ---------------- uma linha -> um lead ---------------- */
 export function linhaParaLead(linha, mapa, extras = {}) {
   const avisos = [], erros = [];
-  const val = {}, multi = { phone: [], email: [], notes: [], ddd: [], whatsapp: [] };
+  const val = {}, colDe = {}, multi = { phone: [], email: [], notes: [], ddd: [], whatsapp: [] };
   for (const [col, campo] of Object.entries(mapa)) {
     if (!campo) continue;
     const v = valorCelula(linha[col]);
     if (!v) continue;
     if (multi[campo]) multi[campo].push({ col, v });
-    else if (!val[campo]) val[campo] = v;
+    else if (!val[campo]) { val[campo] = v; colDe[campo] = col; }
   }
   const lead = {};
   // empresa
@@ -161,7 +178,18 @@ export function linhaParaLead(linha, mapa, extras = {}) {
     if (c.cnpj) lead.cnpj = c.cnpj; else if (c.aviso) avisos.push(c.aviso);
   }
   if (val.cnae) { const c = dig(val.cnae); if (c.length === 7) lead.cnae = c; else avisos.push('CNAE fora do padrão de 7 dígitos: ' + val.cnae); }
-  for (const k of ['cnae_description', 'legal_nature', 'segment', 'specialty', 'city', 'origin', 'contact_name', 'position']) if (val[k]) lead[k] = val[k];
+  for (const k of ['cnae_description', 'legal_nature', 'segment', 'specialty', 'city', 'origin', 'position']) if (val[k]) lead[k] = val[k];
+  // vários nomes na mesma célula ("Ana;Paulo"): o primeiro fica no campo, os outros vão para as observações
+  const nomes = v => txt(v).split(/\s*[;|\n]\s*/).map(txt).filter(Boolean);
+  const notasExtras = [];
+  if (val.contact_name) { const n = nomes(val.contact_name); lead.contact_name = n[0]; if (n.length > 1) notasExtras.push('Outros contatos: ' + n.slice(1).join('; ')); }
+  if (val.decisor_name) {
+    const n = nomes(val.decisor_name);
+    lead.decisor_name = n[0];
+    const deSocios = /socio|qsa|societari/.test(chave(colDe.decisor_name));
+    if (val.decisor_position) lead.decisor_position = val.decisor_position; else if (deSocios) lead.decisor_position = 'Sócio';
+    notasExtras.push((deSocios ? 'Sócios' : 'Decisores') + ' (planilha): ' + n.join('; '));
+  } else if (val.decisor_position) lead.decisor_position = val.decisor_position;
   if (val.state) { const uf = txt(val.state).toUpperCase(); if (/^[A-Z]{2}$/.test(uf)) lead.state = uf; else lead.state = val.state; }
   if (val.website) lead.website = /^https?:\/\//i.test(val.website) ? val.website : (val.website.includes('.') ? 'https://' + val.website.replace(/^\/+/, '') : val.website);
   const end = [val.address, val.address_number && 'nº ' + val.address_number, val.address_extra, val.district, val.cep && 'CEP ' + val.cep].filter(Boolean);
@@ -195,12 +223,17 @@ export function linhaParaLead(linha, mapa, extras = {}) {
   if (emails.length) lead.email = emails[0];
   lead.extra_emails = emails.slice(1);
   // observações: várias colunas viram uma nota, com o nome da coluna
-  const notas = multi.notes.map(({ col, v }) => multi.notes.length > 1 ? col + ': ' + v : v);
+  // a coluna que não é de observação genérica leva o nome na frente ("Alertas: ..."), para não perder o contexto
+  const generica = col => /^(observac|obs$|notas|anotac|comentar|informacoes$)/.test(chave(col));
+  const notas = multi.notes.map(({ col, v }) => multi.notes.length > 1 || notasExtras.length || !generica(col) ? col + ': ' + v : v);
+  notas.push(...notasExtras);
   if (notas.length) lead.notes = notas.join('\n');
-  // decisor: só "identificado" quando a planilha traz nome E cargo de decisão
-  if (lead.contact_name && DECISOR_CARGO.test(semAcento(lead.position))) {
+  // decisor: a situação vinda da planilha vale se for uma das 4; nome de sócio/decisor conhecido = Identificado
+  const sit = DECISOR_SITUACOES.find(x => chave(x) === chave(val.decisor_status));
+  if (lead.decisor_name) lead.decisor_status = sit && sit !== 'Não identificado' ? sit : 'Identificado';
+  else if (lead.contact_name && DECISOR_CARGO.test(semAcento(lead.position))) {
     lead.decisor_status = 'Identificado'; lead.decisor_name = lead.contact_name; lead.decisor_position = lead.position;
-  }
+  } else if (sit && sit !== 'Não identificado') lead.decisor_status = sit;
   if (!lead.origin && extras.origem) lead.origin = extras.origem;
   return { lead, avisos, erros };
 }
