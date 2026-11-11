@@ -484,7 +484,7 @@ async function importXlsx(file){
 function planoAtual(){
  const im=feature.imp;
  return IMP.planejarImportacao(im.linhas,im.mapa,{existentes:(C.state.rawData||C.state.data).leads||[],operacaoId:im.op||null,
-  nomeOperacao:id=>opsAll().find(o=>o.id===id)?.name||'Sem operação',origem:'Importação '+im.nome});
+  nomeOperacao:id=>opsAll().find(o=>o.id===id)?.name||'Sem operação',origem:'Importação '+im.nome,corrigir:!!im.corrigir});
 }
 function importOverlay(){
  const im=feature.imp;if(!im)return '';
@@ -508,7 +508,8 @@ function importOverlay(){
  const semEmpresa=!Object.values(im.mapa).some(c=>c==='company_name'||c==='trade_name');
  return head('Importar '+im.nome)
  +'<div class="notice">'+im.linhas.length+' linha(s) e '+im.cabecalhos.length+' coluna(s). Cada lead novo também entra no Funil de vendas, na coluna Novo. Confira para onde vai cada coluna; colunas ignoradas não são gravadas. Nada que já existe é apagado: leads repetidos só recebem os dados que faltam.</div>'
- +'<div class="formgrid" style="margin-bottom:14px"><div class="field wide"><label>Operação comercial (cliente) *</label><select data-imp-op>'+(temOps?'<option value="">Selecione…</option>':'<option value="">Sem operação</option>')+opsAll().map(o=>'<option value="'+e(o.id)+'" '+(im.op===o.id?'selected':'')+'>'+e(o.name)+'</option>').join('')+'</select></div></div>'
+ +'<div class="formgrid" style="margin-bottom:14px"><div class="field wide"><label>Operação comercial (cliente) *</label><select data-imp-op>'+(temOps?'<option value="">Selecione…</option>':'<option value="">Sem operação</option>')+opsAll().map(o=>'<option value="'+e(o.id)+'" '+(im.op===o.id?'selected':'')+'>'+e(o.name)+'</option>').join('')+'</select></div>'
+ +'<div class="field wide"><label class="squared-input"><input type="checkbox" data-imp-corrigir '+(im.corrigir?'checked':'')+'> Corrigir dados de leads já cadastrados: troca razão social, nome fantasia, CNAE, cidade/UF, endereço, site e decisor pelos da planilha e separa contatos que vieram juntos ("Ana;Paulo"). Nunca troca por vazio; etapa, interesse, ligações e anotações ficam como estão.</label></div></div>'
  +'<div class="tablewrap" style="max-height:42vh"><table class="datatable"><thead><tr><th>Coluna da planilha</th><th>Exemplo</th><th>Vai para</th></tr></thead><tbody>'
  +im.cabecalhos.map((h,i)=>'<tr><td><strong>'+e(h)+'</strong></td><td class="muted">'+e(exemplo(h).slice(0,70))+'</td><td><select data-imp-map="'+i+'">'+opcoesCampo(im.mapa[h])+'</select></td></tr>').join('')+'</tbody></table></div>'
  +(semEmpresa?'<div class="notice" style="margin-top:12px">Escolha a coluna da razão social ou do nome fantasia: sem ela, nenhuma linha entra.</div>':'')
@@ -552,13 +553,17 @@ async function importRun(){
    }
   }
   const existentes=new Map(((C.state.rawData||C.state.data).leads||[]).map(l=>[l.id,l]));
-  for(let i=0;i<plano.atualizacoes.length;i++){
-   const a=plano.atualizacoes[i],base=existentes.get(a.id);
-   if(i%10===0){im.progresso='atualizando '+(i+1)+' de '+plano.atualizacoes.length;C.render()}
+  // atualiza de 5 em 5 (centenas de leads em poucos segundos, sem sobrecarregar o banco)
+  const umaAtualizacao=async a=>{
+   const base=existentes.get(a.id);
    const patch={...a.patch,...Q.camposCalculados({...base,...a.patch},cfgOp),updated_at:new Date().toISOString()};
    const r=await C.db.from('jadem_leads').update(patch).eq('id',a.id);
    if(r.error){const x=byLinha.get(a.linha);x.resultado='rejeitado';x.motivo='Não foi possível completar: '+r.error.message}
-   else{atual++;eventos.push({lead_id:a.id,action:'importação completou dados',detail:a.campos.join(', ')+' · '+im.nome,...(base.owner_id!==C.state.user.id?{owner_id:base.owner_id}:{})})}
+   else{atual++;eventos.push({lead_id:a.id,action:im.corrigir?'importação corrigiu dados':'importação completou dados',detail:a.campos.join(', ')+' · '+im.nome,...(base.owner_id!==C.state.user.id?{owner_id:base.owner_id}:{})})}
+  };
+  for(let i=0;i<plano.atualizacoes.length;i+=5){
+   im.progresso='atualizando '+Math.min(i+5,plano.atualizacoes.length)+' de '+plano.atualizacoes.length;C.render();
+   await Promise.all(plano.atualizacoes.slice(i,i+5).map(umaAtualizacao));
   }
   for(let i=0;i<eventos.length;i+=100){const r=await C.db.from('jadem_lead_events').insert(eventos.slice(i,i+100));if(r.error)console.warn('Auditoria da importação:',r.error.message)}
   await C.load();
@@ -685,6 +690,7 @@ async function onFxChange(ev){
  if(ev.target.dataset?.lf){feature.f={...feature.f,[ev.target.dataset.lf]:ev.target.value};C.render();}
  if(ev.target.dataset?.impMap!==undefined&&feature.imp){feature.imp.mapa={...feature.imp.mapa,[feature.imp.cabecalhos[+ev.target.dataset.impMap]]:ev.target.value};C.render();}
  if(ev.target.hasAttribute?.('data-imp-op')&&feature.imp){feature.imp.op=ev.target.value;C.render();}
+ if(ev.target.hasAttribute?.('data-imp-corrigir')&&feature.imp){feature.imp.corrigir=!!ev.target.checked;C.render();}
  if(ev.target.id==='audioConsent'){feature.audioConsent=ev.target.checked;}
  if(ev.target.id==='leadExcelInput'){try{await importXlsx(ev.target.files[0])}catch(err){C.toast(err.message)}ev.target.value=''}
  if(ev.target.id==='audioFile'){try{await uploadAudio(ev.target.files[0],feature.panel?.id)}catch(err){C.toast(err.message)}ev.target.value=''}

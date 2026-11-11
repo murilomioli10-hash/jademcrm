@@ -241,10 +241,27 @@ export function linhaParaLead(linha, mapa, extras = {}) {
 /* ---------------- juntar sem apagar ---------------- */
 const SIMPLES = ['company_name', 'trade_name', 'cnpj', 'cnae', 'cnae_description', 'legal_nature', 'segment', 'specialty', 'city', 'state',
   'address', 'website', 'origin', 'contact_name', 'position', 'whatsapp', 'decisor_name', 'decisor_position'];
-/** o que o lead novo acrescenta ao existente: só preenche vazio; telefones e e-mails novos viram adicionais */
-export function mesclar(existente, novo) {
+// no modo "corrigir", estes campos são substituídos pelo valor da planilha (nunca por vazio)
+const CORRIGIVEIS = ['company_name', 'trade_name', 'cnae', 'cnae_description', 'legal_nature', 'specialty', 'city', 'state', 'address', 'website',
+  'decisor_name', 'decisor_position'];
+/**
+ * o que o lead novo acrescenta ao existente: só preenche vazio; telefones e e-mails novos viram adicionais.
+ * opt.corrigir: além disso, troca os dados da empresa e do decisor pelos da planilha quando forem diferentes,
+ * e desfaz o contato que veio com vários nomes juntos ("Ana;Paulo").
+ */
+export function mesclar(existente, novo, opt = {}) {
   const patch = {}, campos = [];
   for (const k of SIMPLES) if (vazio(existente[k]) && !vazio(novo[k])) { patch[k] = novo[k]; campos.push(ROTULO[k] || k); }
+  if (opt.corrigir) {
+    for (const k of CORRIGIVEIS) if (!vazio(existente[k]) && !vazio(novo[k]) && txt(existente[k]) !== txt(novo[k])) { patch[k] = novo[k]; campos.push((ROTULO[k] || k) + ' (corrigido)'); }
+    // contato que veio da coluna de sócios (um ou vários nomes): o sócio vai para decisor e o contato volta a ficar em branco
+    const atual = txt(existente.contact_name);
+    if (atual && atual !== txt(novo.contact_name)) {
+      const primeiro = atual.split(/\s*[;|]\s*/).filter(Boolean)[0] || '';
+      const eraSocio = !novo.contact_name && novo.decisor_name && chave(primeiro) === chave(novo.decisor_name);
+      if (/[;|]/.test(atual) || eraSocio) { patch.contact_name = novo.contact_name || null; campos.push('Nome do contato (corrigido)'); }
+    }
+  }
   if (patch.whatsapp) patch.whatsapp_status = 'Não confirmado';
   if ((existente.decisor_status || 'Não identificado') === 'Não identificado' && novo.decisor_status === 'Identificado') patch.decisor_status = 'Identificado';
   if (!existente.estimated_value && novo.estimated_value) { patch.estimated_value = novo.estimated_value; campos.push('Valor potencial'); }
@@ -310,7 +327,7 @@ export function planejarImportacao(linhas, mapa, ctx) {
       } else {
         const a = atualizacoes.get(anterior.id);
         const base = { ...anterior.existente, ...a.patch };
-        const { patch, campos } = mesclar(base, lead);
+        const { patch, campos } = mesclar(base, lead, { corrigir: ctx.corrigir });
         Object.assign(a.patch, patch); campos.forEach(c => a.campos.includes(c) || a.campos.push(c));
         reg(linha, lead, 'ignorado', 'Repetido na planilha (linha ' + anterior.linha + ')' + (campos.length ? '; dados somados: ' + campos.join(', ') : ''));
       }
@@ -320,12 +337,12 @@ export function planejarImportacao(linhas, mapa, ctx) {
     const existente = (lead.cnpj && porCnpj.get(lead.cnpj)) ||
       ((!lead.cnpj || !porNome.get(chaveNome)?.cnpj) && (porNome.get(chaveNome) || (lead.phone && porNome.get(chaveTel))));
     if (existente && (!lead.cnpj || !existente.cnpj || existente.cnpj === lead.cnpj)) {
-      const { patch, campos } = mesclar(existente, lead);
+      const { patch, campos } = mesclar(existente, lead, { corrigir: ctx.corrigir });
       const item = { tipo: 'atualizacao', id: existente.id, existente, linha };
       if (lead.cnpj) noArquivo.set('c' + lead.cnpj, item); else noArquivo.set('n' + chaveTel, item);
       if (!campos.length) { reg(linha, lead, 'ignorado', 'Já cadastrado nesta operação, sem dados novos' + (avisos.length ? '. ' + avisos.join('; ') : '')); atualizacoes.set(existente.id, { linha, id: existente.id, patch: {}, campos: [] }); return; }
       atualizacoes.set(existente.id, { linha, id: existente.id, patch, campos });
-      reg(linha, lead, 'atualizado', 'Completado: ' + campos.join(', ') + (avisos.length ? '. ' + avisos.join('; ') : ''));
+      reg(linha, lead, 'atualizado', (campos.some(c => c.includes('(corrigido)')) ? 'Corrigido/completado: ' : 'Completado: ') + campos.join(', ') + (avisos.length ? '. ' + avisos.join('; ') : ''));
       return;
     }
     // novo nesta operação
