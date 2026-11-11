@@ -126,3 +126,17 @@
 .meet-advanced{border:1px solid #e5ebf0;border-radius:9px;padding:12px;background:#fbfcfe}
 .meet-advanced summary{cursor:pointer;font-size:11px;color:#60778c;font-weight:800}
 .meet-advanced .field{margin:12px 0 0}
+/* lista de leads: filtros; ficha: blocos de informação e telefones */
+.lf-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.lf{display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:800;color:#8d9bac;text-transform:uppercase;letter-spacing:.5px}
+.lf select{min-width:130px;max-width:190px;border:1px solid #dce6eb;border-radius:9px;background:#fff;padding:8px;color:#41556c;font-size:12px;text-transform:none;letter-spacing:0;font-weight:600}
+.info-secao{margin:0 0 16px}
+.jadem-lead-screen .info-secao .detailgrid.info-grid{grid-template-columns:repeat(3,minmax(0,1fr));border:0;border-radius:0;margin:0}
+.info-wide{grid-column:1/-1}
+.fone-linha{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed #e6edf3}
+.fone-linha:last-child{border-bottom:0}
+.fone-acoes{display:flex;gap:6px;flex-wrap:wrap}
+@media(max-width:900px){.jadem-lead-screen .info-secao .detailgrid.info-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.jadem-lead-screen .info-secao .detailgrid.info-grid{grid-template-columns:1fr}.lf select{min-width:0;max-width:none;width:100%}.lf{flex:1 1 45%}}
+.op-regras{grid-column:1/-1;margin:14px 0 4px;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px;background:#fbfdff}
+.op-regras summary{cursor:pointer;font-size:13px;color:#1a283e}

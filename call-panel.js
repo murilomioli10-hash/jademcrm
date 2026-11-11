@@ -1,3 +1,4 @@
+import {ETAPAS,GANHO} from './qualificacao.js';
 
 import {openLeadFromDeal,openMeetingFromDeal} from './features.js';
 let C,chosen='',opened=null,formBusy=false,editScript=false,search='',onlyToday=false;
@@ -10,7 +11,8 @@ const phone=l=>String(l.phone||'').replace(/\D/g,'');
 const tel=l=>{const p=phone(l);return p.length===10||p.length===11?'55'+p:p};
 const when=x=>x?new Intl.DateTimeFormat('pt-BR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(x)):'—';
 const isDue=l=>l.next_call_at&&new Date(l.next_call_at).getTime()<=Date.now();
-const canCall=l=>auth(l)&&phone(l).length>=10&&!l.do_not_contact&&l.status!=='Descartado';
+// fora da fila: fechados (ganho/perdido), sem interesse, telefone inválido e quem pediu para não ligar
+const canCall=l=>auth(l)&&phone(l).length>=10&&!l.do_not_contact&&!['Descartado','Cliente','Fechado — ganho','Fechado — perdido'].includes(l.status)&&l.interest!=='Sem interesse'&&l.phone_status!=='Inválido';
 const rank=l=>(isDue(l)?1000:0)+(l.is_decision_maker?45:0)+Number(l.score||0)*2-(l.next_call_at&&!isDue(l)?250:0)-Math.min(85,Number(l.call_attempts||0)*5);
 function leadQueue(){
  let q=data('leads').filter(canCall);
@@ -71,8 +73,8 @@ const resultMap={
  'Proposta enviada':'Interessado','Follow-up':'Retornar','Fechado':'Interessado','Perdido':'Sem interesse',
  'Falei c/ lead':'Falou com decisor','Não chama':'Não atendeu','Não é momento':'Retornar'
 };
-const pipeline=[['','— manter —'],['Novo','Novo'],['Em contato','Em contato'],['Qualificado','Qualificado'],
- ['Oportunidade','Oportunidade'],['Cliente','Cliente'],['Descartado','Descartado']];
+// etapas do funil; "Fechado — ganho" fica só na ficha do lead, porque exige a condição de fechamento
+const pipeline=[['','— manter —'],...ETAPAS.filter(x=>x!==GANHO).map(x=>[x,x])];
 function escAttr(s){return esc(s)}
 function field(name,label,input){return '<label class="dial-field"><span>'+label+'</span>'+input+'</label>'}
 function select(name,values,chosen='',extra=''){
@@ -91,7 +93,7 @@ function tabContents(l){
  field('Nome do decisor',input('decision_maker',draft.decision_maker??l.contact_name,'maxlength="200" placeholder="Nome do responsável"'))+
  field('É o decisor?',radio('decision_flag',['Sim','Não / Influenciador','Não sei'],draft.decision_flag||''))+
  field('A pessoa atendeu?',radio('answered',['Sim','Não'],draft.answered||''))+
- field('Nível de interesse',radio('interest_level',['Alto','Médio','Baixo','Não avaliado'],draft.interest_level||''))+
+ field('Nível de interesse',radio('interest_level',['Alto','Médio','Baixo','Sem interesse','Não avaliado'],draft.interest_level||''))+
  field('Principal dor / desafio',textField('pain',draft.pain,'Ex.: preço, suporte, captação de clientes...',3));
  if(panelTab==='Script')return '<h3>Script comercial</h3><p class="dial-modal-script">'+esc(renderedScript(l))+'</p>'+
  '<p class="dial-tip">Selecione o script no painel à esquerda. O administrador pode cadastrar scripts para esta operação.</p>';

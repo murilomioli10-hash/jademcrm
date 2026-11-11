@@ -4,28 +4,39 @@ import {googleWidget,isGoogleConnected,syncGoogleMeeting,verifyGoogleAvailabilit
 import {operationField} from './operations.js';
 import {agendaBoard} from './agenda.js';
 let C;
-let feature={panel:null,tab:'info',filter:'Todos',audioConsent:false,recorder:null,recorderStream:null,recChunks:[],importBusy:false};
-const statuses=['Novo','Em contato','Qualificado','Oportunidade','Cliente','Descartado'];
+import * as Q from './qualificacao.js';
+import * as IMP from './importacao.js';
+let feature={panel:null,tab:'info',filter:'Todos',f:{},audioConsent:false,recorder:null,recorderStream:null,recChunks:[],importBusy:false,imp:null};
+const statuses=Q.ETAPAS;
 const co=(key)=>C.state.data[key]||[];
 const e=x=>C.esc(x);
 const button=(name,label,klass='outline')=>'<button class="btn '+klass+' sm" data-fx="'+name+'">'+label+'</button>';
 const bare=(val)=>String(val==null?'':val).trim();
 const dateTime=(d)=>C.fmt(d,{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-const scoreCalc=l=>{
- let v=0;
- if(bare(l.company_name))v+=10;
- if(bare(l.contact_name))v+=10;
- if(bare(l.phone).replace(/\D/g,'').length>=10)v+=15;
- if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bare(l.email)))v+=10;
- if(bare(l.segment))v+=10;
- if(bare(l.position))v+=5;
- if(l.is_decision_maker===true||l.is_decision_maker==='true')v+=15;
- if(bare(l.website))v+=5;
- v+=({Alto:15,'Médio':8,Baixo:0})[l.fit]||0;
- v+=({Alto:10,'Médio':5,Baixo:0})[l.interest]||0;
- if(Number(l.estimated_value)>0)v+=5;
- return Math.min(100,v);
-};
+// regras comerciais da operação do lead (ICP, pesos do score) — ver qualificacao.js
+const opsAll=()=>(C.state.rawData||C.state.data).clientOperations||[];
+const opDe=l=>opsAll().find(o=>o.id===l.operation_id)||null;
+const cfgDe=l=>Q.configDa(opDe(l));
+const calc=l=>Q.camposCalculados(l,cfgDe(l));
+const scoreCalc=l=>calc(l).score;
+const NI='Não informado',NID='Não identificado';
+const fechado=l=>Q.ETAPAS_FECHADAS.includes(Q.etapaAtual(l.status));
+const diasSem=l=>Math.floor((Date.now()-Date.parse(l.last_interaction_at||l.created_at||Date.now()))/864e5);
+const parado=l=>!fechado(l)&&diasSem(l)>=cfgDe(l).dias_parado;
+// próxima atividade: tarefa aberta, retorno marcado ou reunião futura (a mais próxima)
+function proxima(l){
+ const agora=Date.now(),itens=[];
+ co('tasks').filter(t=>t.lead_id===l.id&&!t.done).forEach(t=>itens.push({quando:t.due_at,texto:'Tarefa: '+t.title}));
+ if(l.next_call_at)itens.push({quando:l.next_call_at,texto:'Retorno: '+(l.next_call_action||'ligar de novo')});
+ co('meetings').filter(m=>m.lead_id===l.id&&m.status==='Agendada'&&Date.parse(m.scheduled_at)>=agora).forEach(m=>itens.push({quando:m.scheduled_at,texto:'Reunião: '+m.title}));
+ itens.sort((a,b)=>Date.parse(a.quando||'2999-01-01')-Date.parse(b.quando||'2999-01-01'));
+ const p=itens[0];return p?{...p,vencida:!!p.quando&&Date.parse(p.quando)<agora}:null;
+}
+const vencidas=l=>co('tasks').some(t=>t.lead_id===l.id&&!t.done&&t.due_at&&Date.parse(t.due_at)<Date.now())||(l.next_call_at&&Date.parse(l.next_call_at)<Date.now());
+function responsaveis(l){
+ const nome=m=>co('roster').find(r=>String(r.member_email||'').toLowerCase()===String(m||'').toLowerCase())?.display_name||m;
+ return co('assignments').filter(a=>a.lead_id===l.id).map(a=>(a.role==='SDR'?'SDR':'Closer')+': '+nome(a.assigned_email));
+}
 const warmth=n=>n>=80?['hot','Quente']:n>=50?['warm','Morno']:['','Frio'];
 const scoreHtml=n=>{let w=warmth(Number(n)||0);return '<div class="leadscore"><span class="score-ring '+w[0]+'">'+Number(n||0)+'</span><span class="score-txt">'+w[1]+'</span></div>'};
 const openInfo=id=>{feature.panel={type:'detail',id};feature.tab='info';feature.audioConsent=false;C.render();writeEvent(id,'visualizou')};
@@ -56,25 +67,39 @@ export function setupFeatures(deps){
  document.addEventListener('change',onFxChange);
  document.addEventListener('submit',onFxSubmit);
 }
+// filtros da lista: [chave, rótulo, valor do lead]
+const FILTROS=[['etapa','Etapa',l=>Q.etapaAtual(l.status)],['icp','ICP',l=>l.icp_class?'ICP '+l.icp_class:'Não classificado'],
+ ['uf','UF',l=>bare(l.state).toUpperCase()],['cidade','Cidade',l=>bare(l.city)],['cnae','CNAE',l=>l.cnae?IMP.formatarCNAE(l.cnae):''],
+ ['esp','Especialidade',l=>bare(l.specialty)],['resp','Responsável',l=>responsaveis(l).join(' · ')||'Sem responsável']];
+const SITUACOES={'Atividades vencidas':vencidas,'Sem movimentação':parado,'Com pendência de enriquecimento':l=>Q.pendencias(l).length>0,
+ 'Quente (80–100)':l=>Number(l.score)>=80,'Morno (50–79)':l=>Number(l.score)>=50&&Number(l.score)<80,'Frio (0–49)':l=>Number(l.score)<50};
 export function leadsView(){
- const q=bare(C.state.search).toLowerCase();
- let list=co('leads').filter(l=>!q||[l.company_name,l.contact_name,l.email,l.phone,l.segment,l.city,l.origin].some(x=>bare(x).toLowerCase().includes(q)));
- if(feature.filter==='Quente')list=list.filter(l=>l.score>=80);
- else if(feature.filter==='Morno')list=list.filter(l=>l.score>=50&&l.score<80);
- else if(feature.filter==='Frio')list=list.filter(l=>l.score<50);
- else if(feature.filter!=='Todos')list=list.filter(l=>l.status===feature.filter);
- list.sort((a,b)=>Number(b.score)-Number(a.score)||new Date(b.created_at)-new Date(a.created_at));
+ const q=bare(C.state.search).toLowerCase(),f=feature.f;
  const leads=co('leads');
- const btns='<div class="stacked">'+button('download-template',C.ic('download')+' Modelo Excel')+button('export-xlsx',C.ic('download')+' Exportar Excel')+button('import-xlsx',C.ic('plus')+' Importar Excel','dark')+button('lead-new',C.ic('plus')+' Novo lead','primary')+'</div>';
- return C.title('Lista de leads','Score automático de 0 a 100, qualificação e histórico de acessos.',btns)
+ let list=leads.filter(l=>!q||[l.company_name,l.trade_name,l.cnpj,l.contact_name,l.email,l.phone,l.segment,l.specialty,l.city,l.origin].some(x=>bare(x).toLowerCase().includes(q.replace(/[.\/-]/g,''))||bare(x).toLowerCase().includes(q)));
+ for(const [k,,fn] of FILTROS)if(f[k])list=list.filter(l=>fn(l)===f[k]);
+ if(f.sit&&SITUACOES[f.sit])list=list.filter(SITUACOES[f.sit]);
+ list.sort((a,b)=>Number(b.score)-Number(a.score)||new Date(b.created_at)-new Date(a.created_at));
+ const opcoes=fn=>[...new Set(leads.map(fn).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+ const filtro=(k,rot,fn)=>'<label class="lf"><span>'+e(rot)+'</span><select data-lf="'+k+'"><option value="">Todos</option>'+(k==='etapa'?statuses:opcoes(fn)).map(x=>'<option '+(f[k]===x?'selected':'')+'>'+e(x)+'</option>').join('')+'</select></label>';
+ const isOwnerAll=leads.some(l=>l.owner_id===C.state.user.id);
+ const btns='<div class="stacked">'+button('download-template',C.ic('download')+' Modelo Excel')+button('export-xlsx',C.ic('download')+' Exportar Excel')+button('import-xlsx',C.ic('plus')+' Importar Excel / CSV','dark')+(isOwnerAll?button('recalc',C.ic('activity')+' Recalcular ICP e score'):'')+button('lead-new',C.ic('plus')+' Novo lead','primary')+'</div>';
+ return C.title('Lista de leads','Dados da empresa, contatos, etapa, ICP e próxima atividade de cada lead.',btns)
  +'<div class="leadmetrics">'+[
- ['Total de leads',leads.length],['Quentes (80–100)',leads.filter(l=>l.score>=80).length],['Qualificados',leads.filter(l=>l.status==='Qualificado').length],['Valor potencial',C.money(leads.reduce((n,l)=>n+Number(l.estimated_value||0),0))]
+ ['Total de leads',leads.length],['ICP A',leads.filter(l=>l.icp_class==='A').length],['Atividades vencidas',leads.filter(vencidas).length],['Sem movimentação',leads.filter(parado).length]
  ].map(a=>'<div class="card leadmetric"><small>'+e(a[0])+'</small><strong>'+e(a[1])+'</strong></div>').join('')+'</div>'
- +'<div class="card"><div class="leadtools"><span class="muted">Filtrar por</span><select id="leadFilter" aria-label="Filtrar leads">'+['Todos','Quente','Morno','Frio',...statuses].map(x=>'<option '+(feature.filter===x?'selected':'')+'>'+e(x)+'</option>').join('')+'</select><span class="muted">'+list.length+' resultado(s) • ordenados por score</span></div>'
- +(list.length?'<div class="tablewrap"><table class="datatable leadtable"><thead><tr><th>Empresa / contato</th><th>Score</th><th>Status</th><th>Segmento</th><th>Contato</th><th>Origem</th><th>Atualizado</th></tr></thead><tbody>'+
- list.map(l=>'<tr class="clickable-row" data-lead-open="'+e(l.id)+'"><td><div class="namecell"><span class="letter">'+e(l.company_name.slice(0,1).toUpperCase())+'</span><div>'+e(l.company_name)+'<span class="secondtext">'+e(l.contact_name||'Sem decisor identificado')+'</span></div></div></td><td>'+scoreHtml(l.score)+'</td><td>'+C.badge(l.status)+'</td><td>'+e(l.segment||'—')+'</td><td>'+e(l.phone||l.email||'—')+'</td><td>'+e(l.origin||'—')+'</td><td>'+C.fmt(l.updated_at)+'</td></tr>').join('')+'</tbody></table></div>':'<div class="feature-empty">Nenhum lead encontrado. Cadastre um novo lead ou importe sua planilha Excel.</div>')
+ +'<div class="card"><div class="leadtools lf-grid">'+FILTROS.map(([k,r,fn])=>filtro(k,r,fn)).join('')
+ +'<label class="lf"><span>Situação</span><select data-lf="sit"><option value="">Todas</option>'+Object.keys(SITUACOES).map(x=>'<option '+(f.sit===x?'selected':'')+'>'+e(x)+'</option>').join('')+'</select></label>'
+ +(Object.values(f).some(Boolean)?button('filter-clear','Limpar filtros'):'')+'<span class="muted">'+list.length+' resultado(s) • ordenados por score</span></div>'
+ +(list.length?'<div class="tablewrap"><table class="datatable leadtable"><thead><tr><th>Empresa / contato</th><th>ICP</th><th>Score</th><th>Etapa</th><th>Telefone</th><th>Cidade / UF</th><th>Próxima atividade</th></tr></thead><tbody>'+
+ list.slice(0,1000).map(l=>{const p=proxima(l);return '<tr class="clickable-row" data-lead-open="'+e(l.id)+'"><td><div class="namecell"><span class="letter">'+e(l.company_name.slice(0,1).toUpperCase())+'</span><div>'+e(l.company_name)+'<span class="secondtext">'+e(l.contact_name||l.decisor_name||'Contato não identificado')+'</span></div></div></td>'
+ +'<td>'+(l.icp_class?C.badge('ICP '+l.icp_class):'<span class="muted">—</span>')+'</td><td>'+scoreHtml(l.score)+'</td><td>'+C.badge(Q.etapaAtual(l.status))+'</td>'
+ +'<td>'+e(l.phone||'—')+(l.phone_status==='Validado'?' <span class="tag green">validado</span>':l.phone_status==='Inválido'?' <span class="tag red">inválido</span>':'')+'</td>'
+ +'<td>'+e([l.city,l.state].filter(Boolean).join(' / ')||'—')+'</td>'
+ +'<td>'+(p?'<span class="'+(p.vencida?'tag red':'')+'">'+e(p.texto.slice(0,40))+'</span><span class="secondtext">'+(p.quando?C.fmt(p.quando):'sem prazo')+'</span>':parado(l)?'<span class="tag amber">parado há '+diasSem(l)+' dias</span>':'<span class="muted">—</span>')+'</td></tr>'}).join('')
+ +'</tbody></table></div>'+(list.length>1000?'<p class="note">Mostrando 1.000 de '+list.length+'. Use os filtros para achar o resto.</p>':''):'<div class="feature-empty">Nenhum lead encontrado. Cadastre um novo lead ou importe sua planilha Excel ou CSV.</div>')
  +'<input id="leadExcelInput" type="file" accept=".xlsx,.xls,.csv" hidden></div>'
- +'<p class="note" style="margin-top:12px">Pontuação indicativa: dados completos + aderência do perfil + interesse informado. A temperatura não representa probabilidade estatística de venda.</p>';
+ +'<p class="note" style="margin-top:12px">Score comercial = aderência ao ICP + engajamento, com os pesos definidos na operação. É uma regra de priorização, não probabilidade estatística de venda. A completude cadastral é mostrada à parte e não reduz o score.</p>';
 }
 export function calendarView(){
  const meetings=co('meetings').slice().sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
@@ -104,6 +129,7 @@ export function featuresOverlay(){
  if(!feature.panel)return '';
  let p=feature.panel;
  if(p.type==='edit')return leadForm(p);
+ if(p.type==='import')return importOverlay();
  if(p.type==='detail')return leadDetail(p);
  if(p.type==='meeting')return meetingForm(p);
  return '';
@@ -112,29 +138,100 @@ function fieldValue(name,x){return C.inp(name,x[0],x[1],x[2]||'text',!!x[3],!!x[
 function leadForm(p){
  const l=(p.id&&co('leads').find(x=>x.id===p.id))||{};
  if(p.id&&l.owner_id&&l.owner_id!==C.state.user.id)return '<div class="featureoverlay"><div class="featuremodal"><div class="featurebody">Você tem acesso somente de leitura a este lead. '+button('close','Fechar')+'</div></div></div>';
- const check=l.is_decision_maker?'checked':'';
+ const titulo=t=>'<div class="field wide"><div class="eyebrow" style="margin:10px 0 0">'+e(t)+'</div></div>';
+ const op=opDe(l.id?l:{operation_id:C.state.activeOperation});
+ const sugestao=l.id?Q.sugerirICP(l,cfgDe(l)):null;
+ const linhas=a=>(a||[]).map(x=>typeof x==='string'?x:x.numero).join('\n');
  const fields=[
- C.inp('company_name','Nome da empresa',l.company_name,'text',true,true),
- operationField(l.id?l.operation_id:undefined),
- C.inp('contact_name','Nome do contato',l.contact_name),
- C.inp('position','Cargo / função',l.position),
- C.inp('phone','WhatsApp / telefone',l.phone,'tel'),
- C.inp('email','E-mail',l.email,'email'),
- C.inp('segment','Segmento / atividade',l.segment),
+ titulo('Dados da empresa'),
+ C.inp('company_name','Razão social',l.company_name,'text',true,true),
+ C.inp('trade_name','Nome fantasia',l.trade_name),
+ C.inp('cnpj','CNPJ',l.cnpj?IMP.formatarCNPJ(l.cnpj):''),
+ C.inp('cnae','CNAE principal (código)',l.cnae?IMP.formatarCNAE(l.cnae):''),
+ C.inp('cnae_description','CNAE (descrição)',l.cnae_description,'text',true),
+ C.inp('segment','Segmento',l.segment),
+ C.inp('specialty','Especialidade',l.specialty),
+ C.inp('legal_nature','Natureza jurídica',l.legal_nature),
  C.inp('city','Cidade',l.city),
- C.inp('state','UF',l.state),
- C.inp('website','Site da empresa',l.website),
+ C.inp('state','Estado (UF)',l.state),
+ C.inp('address','Endereço',l.address,'text',true),
+ C.inp('website','Site',l.website),
  C.inp('origin','Origem do lead',l.origin),
- C.sel('status','Etapa',statuses.map(x=>[x,x]),l.status||'Novo'),
- C.sel('fit','Perfil ideal (ICP)',['Baixo','Médio','Alto'].map(x=>[x,x]),l.fit||'Médio'),
- C.sel('interest','Interesse demonstrado',['Baixo','Médio','Alto'].map(x=>[x,x]),l.interest||'Baixo'),
+ operationField(l.id?l.operation_id:undefined),
+ titulo('Dados de contato'),
+ C.inp('contact_name','Nome do contato',l.contact_name),
+ C.inp('position','Cargo',l.position),
+ C.inp('phone','Telefone principal',l.phone,'tel'),
+ C.sel('phone_status','Situação do telefone',Q.TEL_STATUS.map(x=>[x,x]),l.phone_status||'Não informado'),
+ C.area('extra_phones','Telefones adicionais (um por linha)',linhas(l.extra_phones)),
+ C.inp('whatsapp','WhatsApp',l.whatsapp,'tel'),
+ C.sel('whatsapp_status','WhatsApp confirmado?',Q.ZAP_STATUS.map(x=>[x,x]),l.whatsapp_status||'Não confirmado'),
+ C.inp('email','E-mail principal',l.email,'email'),
+ C.area('extra_emails','E-mails adicionais (um por linha)',linhas(l.extra_emails)),
+ C.sel('decisor_status','Decisor',Q.DECISOR.map(x=>[x,x]),l.decisor_status||'Não identificado'),
+ C.inp('decisor_name','Nome do decisor',l.decisor_name),
+ C.inp('decisor_position','Cargo do decisor',l.decisor_position),
+ C.sel('decisor_channel','Canal com o decisor',['Telefone','WhatsApp','E-mail','Presencial','LinkedIn','Indicação','Outro'].map(x=>[x,x]),l.decisor_channel||''),
+ titulo('Dados comerciais'),
+ C.sel('status','Etapa do funil',statuses.map(x=>[x,x]),Q.etapaAtual(l.status||'Novo lead')),
+ C.inp('stage_note','Atividade desta mudança de etapa','','text',true),
+ C.inp('closing_condition','Condição de fechamento'+(op?.closing_requirement?' (exigida: '+op.closing_requirement+')':'')+' — obrigatória para Fechado — ganho',l.closing_condition,'text',true),
+ C.sel('interest','Interesse demonstrado',Q.INTERESSES.map(x=>[x,x]),l.interest||'Não avaliado'),
+ C.sel('icp_class','Classificação ICP',[['','Automática (regra da operação)'],['A','A — revisado pelo gestor'],['B','B — revisado pelo gestor'],['C','C — revisado pelo gestor']],l.icp_source==='Revisado'?l.icp_class:''),
  C.inp('estimated_value','Valor potencial (R$)',l.estimated_value||'0','number'),
- '<div class="field wide"><label class="squared-input"><input type="checkbox" name="is_decision_maker" '+check+'> Falei com o decisor / pessoa com poder de decisão</label></div>',
- C.area('notes','Informações adicionais',l.notes)
+ '<div class="field wide"><p class="note" style="margin:0">'+(sugestao?'Sugestão automática: '+(sugestao.classe?'ICP '+sugestao.classe+' — ':'')+e(sugestao.motivo):'O ICP é sugerido pela regra da operação ao salvar.')+' Escolher A, B ou C marca a classificação como revisada pelo gestor.</p></div>',
+ C.area('notes','Observações',l.notes)
  ].join('');
- return '<div class="featureoverlay" data-feature-overlay><div class="featuremodal"><div class="featureheader"><h2>'+(p.id?'Editar lead':'Cadastrar novo lead')+'</h2>'+button('close','Fechar')+'</div><div class="featurebody"><div class="notice">Score calculado automaticamente a partir dos dados, perfil (ICP) e interesse.</div><form class="featureform" id="leadRecordForm"><div class="formgrid">'+fields+'</div><div class="formfooter">'+button('close','Cancelar')+'<button class="btn primary" type="submit">Salvar lead</button></div></form></div></div></div>';
+ return '<div class="featureoverlay" data-feature-overlay><div class="featuremodal"><div class="featureheader"><h2>'+(p.id?'Editar lead':'Cadastrar novo lead')+'</h2>'+button('close','Fechar')+'</div><div class="featurebody"><div class="notice">Interesse só muda depois de uma interação ou avaliação sua. ICP e score seguem a regra da operação e mostram a justificativa na ficha.</div><form class="featureform" id="leadRecordForm"><div class="formgrid">'+fields+'</div><div class="formfooter">'+button('close','Cancelar')+'<button class="btn primary" type="submit">Salvar lead</button></div></form></div></div></div>';
 }
 function detailCell(label,val){return '<div><div class="detaillabel">'+e(label)+'</div><div class="detailvalue">'+e(val||'—')+'</div></div>'}
+// célula com valor já escapado; vazio vira "Não informado" / "Não identificado"
+const cel=(rot,html,vazio=NI)=>'<div><div class="detaillabel">'+e(rot)+'</div><div class="detailvalue">'+(html&&String(html).trim()?html:'<span class="muted">'+vazio+'</span>')+'</div></div>';
+const chip=(t,cor)=>'<span class="tag '+(cor||'')+'">'+e(t)+'</span>';
+const corTel={Validado:'green',Encontrado:'blue',Inválido:'red'};
+function telefoneLinha(num,rotulo,status){
+ const n=IMP.normalizarTelefone(num),ok=n&&n.valido;
+ return '<div class="fone-linha"><div><strong>'+e(num)+'</strong>'+(rotulo?' <small class="muted">'+e(rotulo)+'</small>':'')+(status?' '+chip(status,corTel[status]||(status==='Confirmado'?'green':'')):'')+'</div>'
+ +'<div class="fone-acoes"><button type="button" class="btn outline sm" data-fx="copy:'+e(num)+'">Copiar</button>'
+ +(ok?'<a class="btn outline sm" data-lead-channel="discador" href="tel:+55'+n.digitos+'">Ligar</a><a class="btn outline sm" data-lead-channel="whatsapp" target="_blank" rel="noopener noreferrer" href="https://wa.me/55'+n.digitos+'">WhatsApp</a>':'<span class="muted">fora do padrão: confira o número</span>')+'</div></div>';
+}
+function infoTab(l,isOwner){
+ const cfg=cfgDe(l),av=Q.avaliar(l,cfg),op=opDe(l),pend=Q.pendencias(l),p=proxima(l);
+ const outras=l.cnpj?[...new Set(((C.state.rawData||C.state.data).leads||[]).filter(x=>x.cnpj===l.cnpj&&x.id!==l.id&&x.operation_id!==l.operation_id).map(x=>opsAll().find(o=>o.id===x.operation_id)?.name||'Sem operação'))]:[];
+ const fones=(l.phone?telefoneLinha(l.phone,'principal',l.phone_status):'')+(l.extra_phones||[]).map(t=>telefoneLinha(t.numero||t,t.rotulo||'adicional')).join('');
+ const emails=[l.email,...(l.extra_emails||[])].filter(Boolean).map((m,i)=>'<div>'+e(m)+(i===0?' <small class="muted">principal</small>':'')+(Q.emailDeContabilidade(m)?' '+chip('possível e-mail de contabilidade','amber'):'')+'</div>').join('');
+ const secao=(t,html)=>'<div class="card info-secao"><div class="sectionhead"><h2>'+e(t)+'</h2></div><div class="detailgrid info-grid">'+html+'</div></div>';
+ return (pend.length?'<div class="notice"><strong>Pendências de enriquecimento:</strong> '+pend.map(x=>e(x)).join(' · ')+'</div>':'')
+ +(outras.length?'<div class="notice">Este CNPJ também está cadastrado em: <strong>'+outras.map(e).join(', ')+'</strong>. Os registros de clientes diferentes ficam separados.</div>':'')
+ +secao('Dados da empresa',[
+  cel('Razão social',e(l.company_name)),cel('Nome fantasia',e(l.trade_name)),cel('CNPJ',l.cnpj?e(IMP.formatarCNPJ(l.cnpj)):''),
+  cel('CNAE principal',l.cnae?e(IMP.formatarCNAE(l.cnae))+(l.cnae_description?' — '+e(l.cnae_description):''):''),
+  cel('Segmento',e(l.segment)),cel('Especialidade',e(l.specialty),av.icp?.a?.esp?'Sugerida pelo nome: '+e(av.icp.a.esp.valor):NID),
+  cel('Cidade',e(l.city)),cel('Estado',e(l.state)),cel('Endereço',e(l.address)),
+  cel('Site',/^https?:\/\//i.test(l.website||'')?'<a href="'+e(l.website)+'" target="_blank" rel="noopener noreferrer">'+e(l.website)+'</a>':e(l.website)),
+  cel('Origem do lead',e(l.origin)),cel('Operação comercial',e(op?.name),'Sem operação')].join(''))
+ +secao('Dados de contato',[
+  cel('Nome do contato',e(l.contact_name),NID),cel('Cargo',e(l.position)),
+  '<div class="info-wide">'+cel('Telefones',fones)+'</div>',
+  cel('WhatsApp',l.whatsapp?telefoneLinha(l.whatsapp,'',l.whatsapp_status||'Não confirmado'):''),
+  cel('E-mail',emails),
+  cel('Decisor',chip(l.decisor_status||NID,l.decisor_status==='Autoridade confirmada'?'green':l.decisor_status==='Não identificado'||!l.decisor_status?'':'blue')
+   +(l.decisor_name?'<div>'+e(l.decisor_name)+(l.decisor_position?' · '+e(l.decisor_position):'')+'</div>':'')+(l.decisor_channel?'<small class="muted">Canal: '+e(l.decisor_channel)+'</small>':''))].join(''))
+ +secao('Dados comerciais',[
+  cel('Etapa do funil',chip(Q.etapaAtual(l.status),'mint')+(l.stage_changed_at?'<small class="muted"> desde '+e(C.fmt(l.stage_changed_at))+'</small>':'')),
+  cel('Status',fechado(l)?e(Q.etapaAtual(l.status)):parado(l)?chip('Sem movimentação há '+diasSem(l)+' dias','amber'):vencidas(l)?chip('Atividade vencida','red'):'Em andamento'),
+  cel('Classificação ICP',l.icp_class?chip('ICP '+l.icp_class,l.icp_class==='A'?'green':l.icp_class==='B'?'blue':'')+' <small class="muted">'+e(l.icp_source||'')+(l.icp_reviewed_by?' por '+e(l.icp_reviewed_by):'')+'</small><div class="note">'+e(l.icp_reason||'')+'</div>':'','Não classificado'),
+  cel('Score comercial',scoreHtml(l.score)+'<small class="muted">Aderência '+(av.aderencia??'—')+'% · Engajamento '+(av.engajamento===null?'não avaliado':av.engajamento+'%')+' · Completude '+av.completude+'%</small>'),
+  cel('Interesse demonstrado',chip(l.interest||'Não avaliado',l.interest==='Alto'?'green':l.interest==='Sem interesse'?'red':'')),
+  cel('Valor potencial',Number(l.estimated_value)>0?e(C.money(l.estimated_value)):''),
+  cel('Responsável comercial',responsaveis(l).map(e).join('<br>'),'Sem responsável definido'),
+  cel('Última interação',l.last_interaction_at?e(dateTime(l.last_interaction_at)):'','Nenhuma interação registrada'),
+  cel('Próxima atividade',p?(p.vencida?chip('Vencida','red')+' ':'')+e(p.texto)+'<small class="muted"> '+(p.quando?e(dateTime(p.quando)):'sem prazo')+'</small>':'','Nenhuma atividade marcada'),
+  l.closing_condition?cel('Condição de fechamento',e(l.closing_condition)):'',
+  '<div class="info-wide">'+cel('Observações','<span style="white-space:pre-line;font-weight:500">'+e(l.notes||'')+'</span>','Nenhuma observação')+'</div>',
+  '<div class="info-wide"><details><summary class="muted" style="cursor:pointer">Por que este score e este ICP?</summary><p class="note" style="white-space:pre-line">'+e(av.justificativa)+'</p></details></div>'].join(''))
+ +'<div class="stacked" style="margin-top:20px">'+teamButton(l)+(isOwner?button('edit-lead:'+l.id,C.ic('edit')+' Editar lead','dark'):'')+'</div>';
+}
 function leadDetail(p){
  const l=co('leads').find(x=>x.id===p.id);if(!l)return '';
  const isOwner=l.owner_id===C.state.user.id;
@@ -142,14 +239,10 @@ function leadDetail(p){
  if(isOwner)tabs.push(['audio','Gravações'],['sharing','Compartilhar']);
  let content='';
  if(feature.tab==='info'){
- content='<div class="notice">Score '+Number(l.score)+' / 100 — '+warmth(l.score)[1]+'. Avaliação por dados, perfil e interesse.</div>'
- +'<div class="detailgrid">'+[
- ['Contato',l.contact_name],['Cargo',l.position],['Telefone',l.phone],['E-mail',l.email],['Segmento',l.segment],['Cidade',l.city?l.city+' / '+(l.state||''):l.state],
- ['Origem',l.origin],['Site',l.website],['Status',l.status],['Perfil ideal',l.fit],['Interesse',l.interest],['Decisor',l.is_decision_maker?'Sim':'Não'],
- ['Valor potencial',C.money(l.estimated_value)]
- ].map(v=>detailCell(v[0],v[1])).join('')+'</div><div class="separator"></div><div class="detaillabel">Observações</div><p style="font-size:12px;line-height:1.8;white-space:pre-line">'+e(l.notes||'Nenhuma observação')+'</p><div class="stacked" style="margin-top:20px">'+teamButton(l)+(isOwner?button('edit-lead:'+l.id,C.ic('edit')+' Editar lead','dark'):'')+(l.phone?lnk('https://wa.me/'+(cleanPhone(l.phone).length<=11?'55':'')+cleanPhone(l.phone),'Abrir WhatsApp'):'')+'</div>';
+ content=infoTab(l,isOwner);
  }else if(feature.tab==='history'){
- const events=co('leadEvents').filter(a=>a.lead_id===l.id).map(a=>({...a,kind:a.action,when:a.created_at}));
+ const events=[...co('leadEvents').filter(a=>a.lead_id===l.id).map(a=>({...a,kind:a.action,when:a.created_at})),
+  ...co('stageHistory').filter(h=>h.lead_id===l.id).map(h=>({id:'etapa-'+h.id,kind:h.from_status?'Etapa: '+h.from_status+' → '+h.to_status:'Etapa inicial: '+h.to_status,detail:h.activity||'',when:h.created_at,actor_id:h.actor_id,actor_email:h.actor_email}))];
  const calls=co('callHistory').filter(a=>a.lead_id===l.id).map(a=>({id:'ligacao-'+a.id,kind:'Ligação registrada',detail:[a.display_result||a.result,a.notes].filter(Boolean).join(' · '),when:a.happened_at||a.created_at,actor_id:a.actor_id,actor_email:a.actor_email}));
  const all=[...events,...calls].sort((a,b)=>Date.parse(b.when||0)-Date.parse(a.when||0));
  const views=events.filter(a=>a.action==='visualizou').length;
@@ -262,18 +355,45 @@ function calendarUrl(m,lead){
 async function saveLead(form){
  const v=Object.fromEntries(new FormData(form).entries());
  for(const k of Object.keys(v))if(typeof v[k]==='string')v[k]=v[k].trim();
- v.is_decision_maker=!!form.elements.is_decision_maker.checked;
- v.estimated_value=Math.max(0,Number(v.estimated_value)||0);
- if(v.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email))throw Error('E-mail inválido.');
- if(!v.company_name||v.company_name.length<2)throw Error('Informe o nome da empresa.');
- v.score=scoreCalc(v);
- v.operation_id=v.operation_id||null;
  const leadId=feature.panel?.id||null;
- if(leadId){const original=co('leads').find(x=>x.id===leadId);if(original&&original.owner_id!==C.state.user.id)throw Error('Lead compartilhado: acesso somente para leitura.')}
+ const original=leadId?co('leads').find(x=>x.id===leadId):null;
+ if(original&&original.owner_id!==C.state.user.id)throw Error('Lead compartilhado: acesso somente para leitura.');
+ if(!v.company_name||v.company_name.length<2)throw Error('Informe a razão social (ou o nome da empresa).');
+ v.estimated_value=Math.max(0,Number(v.estimated_value)||0);
+ // CNPJ e CNAE
+ if(v.cnpj){const c=IMP.normalizarCNPJ(v.cnpj);if(!c.cnpj)throw Error(c.aviso||'CNPJ inválido.');v.cnpj=c.cnpj}else v.cnpj=null;
+ if(v.cnae){const d=v.cnae.replace(/\D/g,'');if(d.length!==7)throw Error('CNAE deve ter 7 dígitos (ex.: 8630-5/03).');v.cnae=d}else v.cnae=null;
+ if(v.state&&/^[a-z]{2}$/i.test(v.state))v.state=v.state.toUpperCase();
+ // telefones: só números válidos; nada inventado
+ // número que já estava gravado e não mudou passa como está (não trava a edição de leads antigos)
+ const jaTinha=new Set([original?.phone,original?.whatsapp,...(original?.extra_phones||[]).map(t=>t.numero||t)].filter(Boolean));
+ const tel=(x,rot)=>{if(!x)return '';if(jaTinha.has(x))return x;const n=IMP.normalizarTelefone(x);if(!n||!n.valido)throw Error(rot+' inválido ('+(n?.motivo||'sem dígitos')+'): '+x);return n.formatado};
+ v.phone=tel(v.phone,'Telefone principal');
+ v.whatsapp=tel(v.whatsapp,'WhatsApp')||null;
+ v.extra_phones=v.extra_phones.split(/\n/).map(x=>x.trim()).filter(Boolean).map(x=>{const antigo=(original?.extra_phones||[]).find(t=>IMP.digitosTelefone(t.numero||t)===IMP.digitosTelefone(x));return antigo&&typeof antigo==='object'?{...antigo,numero:tel(x,'Telefone adicional')}:{numero:tel(x,'Telefone adicional'),rotulo:'adicional'}});
+ if(!v.phone)v.phone_status='Não informado';else if(v.phone_status==='Não informado')v.phone_status='Encontrado';
+ // e-mails
+ if(v.email&&!IMP.emailValido(v.email))throw Error('E-mail principal inválido.');
+ v.email=v.email?v.email.toLowerCase():'';
+ const extras=IMP.normalizarEmails(v.extra_emails.replace(/\n/g,' '));
+ if(extras.invalidos.length)throw Error('E-mail adicional inválido: '+extras.invalidos.join(', '));
+ v.extra_emails=extras.validos.filter(x=>x!==v.email);
+ // etapa e fechamento
+ if(v.status===Q.GANHO&&!v.closing_condition)throw Error('Para marcar como Fechado — ganho, registre a condição de fechamento'+(opDe(v)?.closing_requirement?' exigida: '+opDe(v).closing_requirement:'')+'.');
+ if(!v.stage_note||String(original?.status)===v.status)delete v.stage_note;
+ v.decisor_channel=v.decisor_channel||null;
+ v.is_decision_maker=['Contato estabelecido','Autoridade confirmada'].includes(v.decisor_status);
+ // ICP: vazio = regra automática; A/B/C escolhido = revisão do gestor
+ if(v.icp_class){
+  const mudou=original?.icp_class!==v.icp_class||original?.icp_source!=='Revisado';
+  v.icp_source='Revisado';
+  if(mudou){v.icp_reviewed_by=C.state.user.email;v.icp_reviewed_at=new Date().toISOString();v.icp_reason='Revisado pelo gestor ('+C.state.user.email+'). Sugestão da regra: '+(Q.sugerirICP({...original,...v},cfgDe(v)).motivo||'—')}
+ }else{delete v.icp_class;v.icp_source=null}
+ v.operation_id=v.operation_id||null;
+ Object.assign(v,calc({...(original||{}),...v}));
  const q=leadId?C.db.from('jadem_leads').update({...v,updated_at:new Date().toISOString()}).eq('id',leadId).select('id').single():C.db.from('jadem_leads').insert(v).select('id').single();
  const {data,error}=await q;if(error)throw error;
- const original=leadId?co('leads').find(x=>x.id===leadId):null;
- const changed=original?Object.entries({company_name:'empresa',contact_name:'contato',phone:'telefone',email:'e-mail',status:'etapa comercial',fit:'perfil ICP',interest:'interesse',notes:'observações',estimated_value:'valor potencial',is_decision_maker:'identificação do decisor'}).filter(([k])=>String(original[k]??'')!==String(v[k]??'')).map(([k,label])=>k==='status'||k==='fit'||k==='interest'?label+': '+String(original[k]||'—')+' → '+String(v[k]||'—'):label+' atualizado'):[];
+ const changed=original?Object.entries({company_name:'razão social',trade_name:'nome fantasia',cnpj:'CNPJ',cnae:'CNAE',contact_name:'contato',phone:'telefone',phone_status:'situação do telefone',whatsapp:'WhatsApp',whatsapp_status:'WhatsApp confirmado',email:'e-mail',status:'etapa comercial',icp_class:'ICP',interest:'interesse',decisor_status:'decisor',notes:'observações',estimated_value:'valor potencial',specialty:'especialidade'}).filter(([k])=>String(original[k]??'')!==String(v[k]??'')).map(([k,label])=>['status','icp_class','interest','decisor_status','phone_status','whatsapp_status'].includes(k)?label+': '+String(original[k]||'—')+' → '+String(v[k]||'—'):label+' atualizado'):[];
  const detail=original?(changed.length?'Campos alterados: '+changed.join('; '):'Formulário salvo sem alterações de campos'):'Lead cadastrado · Pontuação inicial: '+v.score;
  await C.load();await writeEvent(data.id,leadId?'editou':'criou',detail.slice(0,1500));
  feature.panel={type:'detail',id:data.id};feature.tab='info';C.render();C.toast('Lead salvo com sucesso.');
@@ -322,86 +442,149 @@ async function loadXlsx(){
  });
  return window.__jademXlsxPromise;
 }
-const excelHeaders=['Empresa','Contato','Cargo','Telefone','Email','Segmento','Cidade','Estado','Origem','Site','Status','Perfil','Interesse','Decisor','Valor previsto','Observações'];
+const excelHeaders=['Razão social','Nome fantasia','CNPJ','CNAE','Descrição CNAE','Segmento','Especialidade','Cidade','UF','Endereço','Site','Origem','Contato','Cargo','Telefone','Telefone 2','WhatsApp','E-mail','E-mail 2','Etapa','Observações'];
+const exportHeaders=[...excelHeaders,'Situação do telefone','WhatsApp confirmado','Decisor','Nome do decisor','Interesse','ICP','Score','Aderência ICP (%)','Engajamento (%)','Completude (%)','Valor potencial','Última interação'];
 function excelValue(s){let v=bare(s);return /^[=+\-@\t\r]/.test(v)?"'"+v:v}
-function rowForExport(l){return {
- Empresa:excelValue(l.company_name),Contato:excelValue(l.contact_name),Cargo:excelValue(l.position),Telefone:excelValue(l.phone),
- Email:excelValue(l.email),Segmento:excelValue(l.segment),Cidade:excelValue(l.city),Estado:excelValue(l.state),Origem:excelValue(l.origin),
- Site:excelValue(l.website),Status:l.status,Perfil:l.fit,Interesse:l.interest,Decisor:l.is_decision_maker?'Sim':'Não',
- 'Valor previsto':Number(l.estimated_value||0),Score:Number(l.score||0),'Observações':excelValue(l.notes)
+function rowForExport(l){const x=excelValue;return {
+ 'Razão social':x(l.company_name),'Nome fantasia':x(l.trade_name),'CNPJ':l.cnpj?IMP.formatarCNPJ(l.cnpj):'','CNAE':l.cnae?IMP.formatarCNAE(l.cnae):'',
+ 'Descrição CNAE':x(l.cnae_description),'Segmento':x(l.segment),'Especialidade':x(l.specialty),'Cidade':x(l.city),'UF':x(l.state),'Endereço':x(l.address),
+ 'Site':x(l.website),'Origem':x(l.origin),'Contato':x(l.contact_name),'Cargo':x(l.position),'Telefone':x(l.phone),
+ 'Telefone 2':x((l.extra_phones||[]).map(t=>t.numero||t).join(' / ')),'WhatsApp':x(l.whatsapp),'E-mail':x(l.email),'E-mail 2':x((l.extra_emails||[]).join('; ')),
+ 'Etapa':Q.etapaAtual(l.status),'Observações':x(l.notes),'Situação do telefone':l.phone_status||'','WhatsApp confirmado':l.whatsapp_status||'',
+ 'Decisor':l.decisor_status||'','Nome do decisor':x(l.decisor_name),'Interesse':l.interest||'','ICP':l.icp_class||'','Score':Number(l.score||0),
+ 'Aderência ICP (%)':l.score_icp??'','Engajamento (%)':l.score_engagement??'','Completude (%)':l.completeness??'','Valor potencial':Number(l.estimated_value||0),
+ 'Última interação':l.last_interaction_at?new Date(l.last_interaction_at).toLocaleString('pt-BR'):''
 }}
 async function exportXlsx(template=false){
  const XLSX=await loadXlsx();
  const rows=template?[Object.fromEntries(excelHeaders.map(h=>[h,'']))]:co('leads').map(rowForExport);
- const ws=XLSX.utils.json_to_sheet(rows,{header:template?excelHeaders:[...excelHeaders,'Score']});
- ws['!cols']=excelHeaders.concat(['Score']).map(h=>({wch:['Empresa','Contato','Observações'].includes(h)?30:19}));
+ const cols=template?excelHeaders:exportHeaders;
+ const ws=XLSX.utils.json_to_sheet(rows,{header:cols});
+ // CNPJ e telefones como texto: o Excel não come zeros à esquerda
+ const range=XLSX.utils.decode_range(ws['!ref']);
+ for(let c=range.s.c;c<=range.e.c;c++){const h=cols[c];if(['CNPJ','CNAE','Telefone','Telefone 2','WhatsApp'].includes(h))for(let r=1;r<=range.e.r;r++){const cell=ws[XLSX.utils.encode_cell({r,c})];if(cell){cell.t='s';cell.z='@'}}}
+ ws['!cols']=cols.map(h=>({wch:['Razão social','Observações','Endereço','Descrição CNAE'].includes(h)?32:18}));
  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Leads');
  XLSX.writeFile(wb,template?'jadem-modelo-importacao.xlsx':'jadem-leads-'+new Date().toISOString().slice(0,10)+'.xlsx');
 }
-function norm(k){return String(k).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'')}
-function readCell(row,aliases){const dict=Object.fromEntries(Object.entries(row).map(([k,v])=>[norm(k),v]));for(const k of aliases){if(dict[norm(k)]!==undefined)return bare(dict[norm(k)]);}return '';}
-function yes(x){return ['1','sim','s','yes','true','x'].includes(norm(x))}
-function safeEnum(x,items,def){let z=items.find(y=>norm(y)===norm(x));return z||def}
-function mappedLead(row){
- let l={
- company_name:readCell(row,['Empresa','Razão Social','Nome da Empresa','Company','empresa_nome']),
- contact_name:readCell(row,['Contato','Pessoa','Nome','Decisor','Nome do Contato']),
- position:readCell(row,['Cargo','Função','Posição']),
- phone:readCell(row,['Telefone','Celular','WhatsApp','Fone']),
- email:readCell(row,['Email','E-mail','Correio']),
- segment:readCell(row,['Segmento','Ramo','Atividade']),
- city:readCell(row,['Cidade','Município']),
- state:readCell(row,['Estado','UF']),
- origin:readCell(row,['Origem','Fonte','Canal']),
- website:readCell(row,['Site','Website','URL']),
- status:safeEnum(readCell(row,['Status','Situação','Etapa']),statuses,'Novo'),
- fit:safeEnum(readCell(row,['Perfil','ICP','Fit']),['Baixo','Médio','Alto'],'Médio'),
- interest:safeEnum(readCell(row,['Interesse','Intenção']),['Baixo','Médio','Alto'],'Baixo'),
- is_decision_maker:yes(readCell(row,['Decisor','É Decisor','Tomador de decisão'])),
- estimated_value:Math.max(0,Number(readCell(row,['Valor previsto','Valor','Ticket']).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3}(?:\D|$))/g,'').replace(',','.'))||0),
- notes:readCell(row,['Observações','Notas','Informações','Obs'])
- };
- l.score=scoreCalc(l);
- return l;
-}
+
+/* ---------------- importação: arquivo -> mapeamento -> gravação -> relatório ---------------- */
+const opValida=id=>!!id&&opsAll().some(o=>o.id===id);
 async function importXlsx(file){
- if(feature.importBusy)return;
- if(!file)return;
- if(file.size>5*1024*1024)throw Error('Arquivo acima de 5 MB.');
+ if(feature.importBusy||!file)return;
+ if(file.size>10*1024*1024)throw Error('Arquivo acima de 10 MB.');
  const XLSX=await loadXlsx();
- const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});
- const ws=wb.Sheets[wb.SheetNames[0]];
- if(!ws)throw Error('Não há planilha no arquivo.');
- const rows=XLSX.utils.sheet_to_json(ws,{defval:'',raw:false});
- if(rows.length>2000)throw Error('Limite de 2.000 linhas por importação.');
- const seen=new Set(co('leads').map(l=>[norm(l.company_name),cleanPhone(l.phone),norm(l.email)].join('|')));
- const prepared=[];let skipped=0;
- for(const item of rows){
-  const l=mappedLead(item);
-  if(l.company_name.length<2){skipped++;continue;}
-  const key=[norm(l.company_name),cleanPhone(l.phone),norm(l.email)].join('|');
-  if(seen.has(key)){skipped++;continue;}
-  seen.add(key);prepared.push({...l,operation_id:C.state.activeOperation&&C.state.activeOperation!=='unassigned'?C.state.activeOperation:null});
+ const {cabecalhos,linhas}=IMP.lerPlanilha(XLSX,await file.arrayBuffer(),file.name);
+ if(!linhas.length)throw Error('A planilha não tem linhas preenchidas.');
+ if(linhas.length>5000)throw Error('Limite de 5.000 linhas por importação. Divida o arquivo.');
+ const ativa=C.state.activeOperation;
+ feature.imp={nome:file.name,cabecalhos,linhas,mapa:IMP.autoMapear(cabecalhos),op:opValida(ativa)?ativa:'',fase:'mapear'};
+ feature.panel={type:'import'};C.render();
+}
+function planoAtual(){
+ const im=feature.imp;
+ return IMP.planejarImportacao(im.linhas,im.mapa,{existentes:(C.state.rawData||C.state.data).leads||[],operacaoId:im.op||null,
+  nomeOperacao:id=>opsAll().find(o=>o.id===id)?.name||'Sem operação',origem:'Importação '+im.nome});
+}
+function importOverlay(){
+ const im=feature.imp;if(!im)return '';
+ const head=t=>'<div class="featureoverlay"><div class="featuremodal wide"><div class="featureheader"><h2>'+e(t)+'</h2>'+(im.fase==='executando'?'':button('import-cancel','Fechar'))+'</div><div class="featurebody">';
+ if(im.fase==='executando')return head('Importando '+im.nome)+'<p>Gravando no JADEM… '+e(im.progresso||'')+'</p><p class="note">Não feche esta janela.</p></div></div></div>';
+ if(im.fase==='relatorio'){
+  const r=IMP.resumo(im.relatorio);
+  return head('Relatório da importação')+'<div class="grid4" style="margin-bottom:14px">'+[['Importados',r.importado,'green'],['Atualizados',r.atualizado,'blue'],['Ignorados',r.ignorado,'amber'],['Rejeitados',r.rejeitado,'red']].map(([t,n,c])=>'<div class="card kpi" style="min-height:0"><div class="metric-label">'+t+'</div><div class="metric-value">'+n+'</div></div>').join('')+'</div>'
+  +'<p class="note">'+e(im.nome)+' · operação '+e(opsAll().find(o=>o.id===im.op)?.name||'Sem operação')+'. Conferido no banco depois da gravação: '+e(im.conferido||'—')+'</p>'
+  +'<div class="stacked" style="margin:10px 0">'+button('import-report',C.ic('download')+' Baixar relatório (Excel/CSV)','primary')+'</div>'
+  +'<div class="tablewrap" style="max-height:50vh"><table class="datatable"><thead><tr><th>Linha</th><th>Empresa</th><th>CNPJ</th><th>Resultado</th><th>Motivo</th></tr></thead><tbody>'
+  +im.relatorio.slice(0,800).map(x=>'<tr><td>'+x.linha+'</td><td>'+e(x.empresa)+'</td><td>'+e(IMP.formatarCNPJ(x.cnpj))+'</td><td>'+chip(x.resultado,{importado:'green',atualizado:'blue',ignorado:'amber',rejeitado:'red'}[x.resultado])+'</td><td>'+e(x.motivo||'')+'</td></tr>').join('')
+  +'</tbody></table></div></div></div></div>';
  }
- if(!prepared.length)return C.toast('Nenhum lead novo para importar. Confira as colunas e os duplicados.');
- if(!C.state.activeOperation&&(C.state.rawData?.clientOperations||[]).length)throw Error('Selecione a operação no menu lateral antes de importar Excel.');
- if(!window.confirm('Importar '+prepared.length+' leads para o JADEM CRM? '+skipped+' linhas serão ignoradas (vazias, inválidas ou duplicadas).'))return;
- feature.importBusy=true;
- let done=0,events=[];
+ const temOps=opsAll().length>0;
+ let plano=null,erroPlano='';
+ try{plano=planoAtual()}catch(err){erroPlano=err.message}
+ const r=plano?IMP.resumo(plano.relatorio):null;
+ const exemplo=h=>im.linhas.map(x=>IMP.valorCelula(x[h])).filter(Boolean).slice(0,2).join(' · ');
+ const opcoesCampo=v=>'<option value="">— ignorar coluna —</option>'+IMP.CAMPOS.map(([c,rot])=>'<option value="'+c+'" '+(v===c?'selected':'')+'>'+e(rot)+'</option>').join('');
+ const semEmpresa=!Object.values(im.mapa).some(c=>c==='company_name'||c==='trade_name');
+ return head('Importar '+im.nome)
+ +'<div class="notice">'+im.linhas.length+' linha(s) e '+im.cabecalhos.length+' coluna(s). Confira para onde vai cada coluna; colunas ignoradas não são gravadas. Nada que já existe é apagado: leads repetidos só recebem os dados que faltam.</div>'
+ +'<div class="formgrid" style="margin-bottom:14px"><div class="field wide"><label>Operação comercial (cliente) *</label><select data-imp-op>'+(temOps?'<option value="">Selecione…</option>':'<option value="">Sem operação</option>')+opsAll().map(o=>'<option value="'+e(o.id)+'" '+(im.op===o.id?'selected':'')+'>'+e(o.name)+'</option>').join('')+'</select></div></div>'
+ +'<div class="tablewrap" style="max-height:42vh"><table class="datatable"><thead><tr><th>Coluna da planilha</th><th>Exemplo</th><th>Vai para</th></tr></thead><tbody>'
+ +im.cabecalhos.map((h,i)=>'<tr><td><strong>'+e(h)+'</strong></td><td class="muted">'+e(exemplo(h).slice(0,70))+'</td><td><select data-imp-map="'+i+'">'+opcoesCampo(im.mapa[h])+'</select></td></tr>').join('')+'</tbody></table></div>'
+ +(semEmpresa?'<div class="notice" style="margin-top:12px">Escolha a coluna da razão social ou do nome fantasia: sem ela, nenhuma linha entra.</div>':'')
+ +(erroPlano?'<div class="notice">'+e(erroPlano)+'</div>':'')
+ +(r?'<p style="margin-top:12px"><strong>Prévia:</strong> '+r.importado+' novo(s) · '+r.atualizado+' completado(s) · '+r.ignorado+' ignorado(s) · '+r.rejeitado+' rejeitado(s)</p>':'')
+ +'<div class="formfooter">'+button('import-cancel','Cancelar')+'<button class="btn primary" data-fx="import-run" '+((temOps&&!im.op)||semEmpresa||!r||(!r.importado&&!r.atualizado)?'disabled':'')+'>Importar</button></div></div></div></div>';
+}
+async function importRun(){
+ const im=feature.imp;if(!im||feature.importBusy)return;
+ if(opsAll().length&&!opValida(im.op))throw Error('Escolha a operação comercial.');
+ const plano=planoAtual();
+ const rel=plano.relatorio,byLinha=new Map(rel.map(x=>[x.linha,x]));
+ const op=im.op||null,cfgOp=Q.configDa(opsAll().find(o=>o.id===op));
+ feature.importBusy=true;im.fase='executando';C.render();
+ let novos=0,atual=0;const eventos=[];
+ const prepara=it=>{
+  const l={...it.lead,operation_id:op,interest:'Não avaliado',stage_note:'Importação: '+im.nome};
+  if(l.status===Q.GANHO){l.status='Negociação';byLinha.get(it.linha).motivo=(byLinha.get(it.linha).motivo?byLinha.get(it.linha).motivo+'; ':'')+'etapa "ganho" exige condição de fechamento: entrou como Negociação'}
+  if(!l.status)delete l.status;
+  return {...l,...Q.camposCalculados(l,cfgOp)};
+ };
  try{
-  for(let i=0;i<prepared.length;i+=100){
-   const {data,error}=await C.db.from('jadem_leads').insert(prepared.slice(i,i+100)).select('id');
-   if(error)throw error;
-   done+=(data||[]).length;
-   events.push(...(data||[]).map(x=>({lead_id:x.id,action:'importou',detail:'Importação Excel'})));
+  for(let i=0;i<plano.novos.length;i+=50){
+   const lote=plano.novos.slice(i,i+50);
+   im.progresso='novos '+Math.min(i+50,plano.novos.length)+' de '+plano.novos.length;C.render();
+   let {data,error}=await C.db.from('jadem_leads').insert(lote.map(prepara)).select('id');
+   if(error){   // um registro ruim derruba o lote: grava um a um para saber qual
+    data=[];
+    for(const it of lote){
+     const r=await C.db.from('jadem_leads').insert(prepara(it)).select('id').single();
+     if(r.error){const x=byLinha.get(it.linha);x.resultado='rejeitado';x.motivo=(r.error.code==='23505'?'CNPJ já cadastrado nesta operação':r.error.message)}
+     else data.push(r.data);
+    }
+   }
+   novos+=(data||[]).length;
+   (data||[]).forEach(x=>eventos.push({lead_id:x.id,action:'importou',detail:'Importação '+im.nome}));
   }
-  for(let i=0;i<events.length;i+=100){
-   const r=await C.db.from('jadem_lead_events').insert(events.slice(i,i+100));
-   if(r.error)console.warn('Audit import:',r.error.message);
+  const existentes=new Map(((C.state.rawData||C.state.data).leads||[]).map(l=>[l.id,l]));
+  for(let i=0;i<plano.atualizacoes.length;i++){
+   const a=plano.atualizacoes[i],base=existentes.get(a.id);
+   if(i%10===0){im.progresso='atualizando '+(i+1)+' de '+plano.atualizacoes.length;C.render()}
+   const patch={...a.patch,...Q.camposCalculados({...base,...a.patch},cfgOp),updated_at:new Date().toISOString()};
+   const r=await C.db.from('jadem_leads').update(patch).eq('id',a.id);
+   if(r.error){const x=byLinha.get(a.linha);x.resultado='rejeitado';x.motivo='Não foi possível completar: '+r.error.message}
+   else{atual++;eventos.push({lead_id:a.id,action:'importação completou dados',detail:a.campos.join(', ')+' · '+im.nome,...(base.owner_id!==C.state.user.id?{owner_id:base.owner_id}:{})})}
   }
-  await C.load();C.toast(done+' leads importados com sucesso.');
- }catch(err){await C.load();throw Error('Importação parcial ('+done+' registros): '+err.message)}
- finally{feature.importBusy=false;}
+  for(let i=0;i<eventos.length;i+=100){const r=await C.db.from('jadem_lead_events').insert(eventos.slice(i,i+100));if(r.error)console.warn('Auditoria da importação:',r.error.message)}
+  await C.load();
+  // confere no banco: os CNPJs importados estão lá, na operação certa
+  const cnpjs=plano.novos.map(n=>n.lead.cnpj).filter(Boolean);
+  const gravados=((C.state.rawData||C.state.data).leads||[]).filter(l=>(l.operation_id||null)===op&&cnpjs.includes(l.cnpj)).length;
+  im.conferido=novos+' novo(s) e '+atual+' atualizado(s) gravados'+(cnpjs.length?'; '+gravados+' de '+cnpjs.length+' CNPJs encontrados na operação':'');
+  im.relatorio=rel;im.fase='relatorio';
+  C.toast(novos+' lead(s) importado(s), '+atual+' completado(s).');
+ }catch(err){
+  await C.load();im.relatorio=rel;im.fase='relatorio';im.conferido='importação interrompida: '+err.message+' ('+novos+' novos gravados antes do erro)';
+ }finally{feature.importBusy=false;C.render()}
+}
+function baixarRelatorio(){
+ const im=feature.imp;if(!im?.relatorio)return;
+ const blob=new Blob([IMP.relatorioCSV(im.relatorio)],{type:'text/csv;charset=utf-8'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='relatorio-importacao-'+im.nome.replace(/\.[^.]+$/,'')+'.csv';a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+async function recalcular(){
+ const meus=co('leads').filter(l=>l.owner_id===C.state.user.id);
+ if(!meus.length)return;
+ if(!confirm('Recalcular ICP, score e completude de '+meus.length+' lead(s) pela regra de cada operação? ICP revisado pelo gestor é mantido.'))return;
+ let n=0;
+ for(const l of meus){
+  const novo=calc(l);
+  if(['score','score_icp','score_engagement','completeness','icp_class','score_reason'].some(k=>(l[k]??null)!==(novo[k]??null))){
+   const r=await C.db.from('jadem_leads').update(novo).eq('id',l.id);if(!r.error)n++;
+  }
+ }
+ await C.load();C.toast(n+' lead(s) recalculado(s).');
 }
 async function playAudio(id){
  const row=co('recordings').find(x=>x.id===id);if(!row)return;
@@ -459,6 +642,12 @@ async function onFxClick(ev){
  const a=b.dataset.fx;
  try{
   if(a==='close'){if(feature.recorder)throw Error('Pare a gravação antes de fechar.');feature.panel=null;C.render();}
+  else if(a==='import-cancel'){if(feature.importBusy)return;feature.imp=null;feature.panel=null;C.render();}
+  else if(a==='import-run')await importRun();
+  else if(a==='import-report')baixarRelatorio();
+  else if(a==='recalc')await recalcular();
+  else if(a==='filter-clear'){feature.f={};C.render();}
+  else if(a.startsWith('copy:')){const t=a.slice(5);try{await navigator.clipboard.writeText(t);C.toast('Copiado: '+t)}catch(err){C.toast('Não foi possível copiar. Selecione o número.')}}
   else if(a==='lead-new'){feature.panel={type:'edit'};C.render();}
   else if(a==='google-calendar-draft'){const form=document.getElementById('meetingForm');if(!form)throw Error('Formulário de reunião não encontrado.');window.open(googleCalendarDraft(form),'_blank','noopener,noreferrer');C.toast('Revise o convite e adicione o Meet no Google Agenda antes de salvar.');}
   else if(a.startsWith('edit-lead:')){feature.panel={type:'edit',id:a.split(':')[1]};C.render();}
@@ -488,6 +677,9 @@ async function onFxClick(ev){
 }
 async function onFxChange(ev){
  if(ev.target.id==='leadFilter'){feature.filter=ev.target.value;C.render();}
+ if(ev.target.dataset?.lf){feature.f={...feature.f,[ev.target.dataset.lf]:ev.target.value};C.render();}
+ if(ev.target.dataset?.impMap!==undefined&&feature.imp){feature.imp.mapa={...feature.imp.mapa,[feature.imp.cabecalhos[+ev.target.dataset.impMap]]:ev.target.value};C.render();}
+ if(ev.target.hasAttribute?.('data-imp-op')&&feature.imp){feature.imp.op=ev.target.value;C.render();}
  if(ev.target.id==='audioConsent'){feature.audioConsent=ev.target.checked;}
  if(ev.target.id==='leadExcelInput'){try{await importXlsx(ev.target.files[0])}catch(err){C.toast(err.message)}ev.target.value=''}
  if(ev.target.id==='audioFile'){try{await uploadAudio(ev.target.files[0],feature.panel?.id)}catch(err){C.toast(err.message)}ev.target.value=''}

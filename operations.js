@@ -1,10 +1,11 @@
 
+import {configDa,MODELO_MARKETING_MEDICO} from './qualificacao.js';
 let C=null,modal=null,working=false,user='';
 const esc=x=>C.esc(x??'');
 const full=()=>C.state.rawData||C.state.data;
 const ops=()=>full().clientOperations||[];
 const scoped=['companies','people','deals','tasks','activities','leads','meetings','send','sendCampaigns'];
-const related=['leadEvents','recordings','shares','assignments'];
+const related=['leadEvents','recordings','shares','assignments','stageHistory'];
 const states=['Implantação','Ativa','Pausada','Encerrada'];
 function key(){return 'jadem_op_'+C.state.user.id}
 export function scopeOperations(){
@@ -79,7 +80,56 @@ export function operationsOverlay(){
  f('commission_percent','Comissão (%)',x?.commission_percent,'number','min="0" max="100" step="0.01"')+
  '<label class="op-field"><span>Status</span><select name="status">'+states.map(s=>'<option value="'+s+'" '+(s===(x?.status||'Implantação')?'selected':'')+'>'+s+'</option>').join('')+'</select></label>'+
  '<label class="op-field op-wide"><span>Observações</span><textarea name="notes" rows="3">'+esc(x?.notes||'')+'</textarea></label></div>'+
+ regrasCampos(x)+
  '<div class="op-actions"><button type="button" class="btn outline" data-op="close">Cancelar</button><button class="btn primary" type="submit" '+(working?'disabled':'')+'>Salvar operação</button></div></form></div></div>';
+}
+// ---------- regras comerciais (ICP e score) ----------
+const cnaeFmt=c=>/^\d{7}$/.test(c)?c.replace(/^(\d{4})(\d)(\d{2})$/,'$1-$2/$3'):c;
+function regrasCampos(x){
+ const c=configDa(x),p=c.pesos;
+ const ta=(n,l,v,h)=>'<label class="op-field op-wide"><span>'+l+'</span><textarea name="'+n+'" rows="2" placeholder="'+esc(h)+'">'+esc(v)+'</textarea></label>';
+ const num=(n,l,v)=>f(n,l,v,'number','min="0" max="100" step="1"');
+ return '<details class="op-regras" '+(x&&(x.commercial_config&&Object.keys(x.commercial_config).length)?'':'open')+'><summary><strong>Regras comerciais: ICP, score e fechamento</strong></summary>'+
+ '<p class="muted">Pesos são regras da operação para priorizar leads, não probabilidade estatística. O CNAE sozinho nunca define o ICP A. Mudar aqui não altera contrato, setup nem comissão.</p>'+
+ '<div class="op-actions" style="justify-content:flex-start;margin:6px 0 10px"><button type="button" class="btn outline sm" data-op="modelo-medico">Usar modelo: Marketing médico (Cazado)</button></div>'+
+ '<div class="op-fields">'+
+ f('closing_requirement','Condição exigida para Fechado — ganho',x?.closing_requirement,'text','maxlength="200" placeholder="Ex.: contrato assinado e 1ª mensalidade paga"')+
+ ta('cfg_cnaes','CNAEs prioritários (um por linha)',c.cnaes.map(cnaeFmt).join('\n'),'8630-5/03')+
+ ta('cfg_segmentos','Palavras do segmento-alvo (separe por vírgula)',c.segmentos.join(', '),'medic, clinica, consultorio')+
+ ta('cfg_especialidades','Palavras que indicam especialidade (separe por vírgula)',c.especialidades.join(', '),'dermatolog, ortoped, cardiolog')+
+ f('cfg_ufs','UFs atendidas (vazio = Brasil inteiro)',c.ufs.join(', '),'text','placeholder="SP, RJ, MG"')+
+ num('cfg_p_cnae','Peso: CNAE prioritário',p.cnae)+num('cfg_p_segmento','Peso: segmento',p.segmento)+num('cfg_p_especialidade','Peso: especialidade',p.especialidade)+
+ num('cfg_p_regiao','Peso: região atendida',p.regiao)+num('cfg_p_privado','Peso: operação privada',p.privado)+
+ num('cfg_limite_a','Aderência mínima para ICP A (%)',c.limites.A)+
+ num('cfg_s_icp','Score: peso da aderência ao ICP',c.score.icp)+num('cfg_s_eng','Score: peso do engajamento',c.score.engajamento)+
+ f('cfg_dias','Dias sem movimentação para alertar',c.dias_parado,'number','min="1" max="365" step="1"')+
+ '<label class="op-field op-wide"><span><input type="checkbox" name="cfg_tarefa_pesquisa" '+(c.tarefa_pesquisa?'checked':'')+'> Criar tarefa de pesquisa para lead sem telefone e sem e-mail</span></label>'+
+ '<label class="op-field op-wide"><span><input type="checkbox" name="cfg_followup" '+(c.followup?'checked':'')+'> Criar tarefa de follow-up quando uma conversa termina sem próximo passo</span></label>'+
+ '</div></details>';
+}
+function lerRegras(d,anterior){
+ const lista=k=>String(d.get(k)||'').split(/[,\n;]+/).map(x=>x.trim()).filter(Boolean);
+ const n=(k,min=0,max=100)=>{const v=Number(d.get(k));if(!Number.isFinite(v)||v<min||v>max)throw Error('Valor inválido em regras comerciais ('+k.replace('cfg_','')+').');return Math.round(v)};
+ const cnaes=String(d.get('cfg_cnaes')||'').split(/\n+/).map(x=>(x.match(/^\s*([\d.\-\/ ]{7,12})/)||[])[1]||x).map(x=>x.replace(/\D/g,'')).filter(Boolean);
+ if(cnaes.some(c=>c.length!==7))throw Error('Cada CNAE prioritário precisa ter 7 dígitos (ex.: 8630-5/03).');
+ const ufs=lista('cfg_ufs').map(x=>x.toUpperCase());
+ if(ufs.some(u=>!/^[A-Z]{2}$/.test(u)))throw Error('UFs devem ter 2 letras, separadas por vírgula.');
+ const s={icp:n('cfg_s_icp'),engajamento:n('cfg_s_eng')};
+ if(!s.icp&&!s.engajamento)throw Error('Os pesos do score não podem ser os dois zero.');
+ return {...(anterior||{}),cnaes,segmentos:lista('cfg_segmentos'),especialidades:lista('cfg_especialidades'),ufs,
+  pesos:{cnae:n('cfg_p_cnae'),segmento:n('cfg_p_segmento'),especialidade:n('cfg_p_especialidade'),regiao:n('cfg_p_regiao'),privado:n('cfg_p_privado')},
+  limites:{A:n('cfg_limite_a')},score:s,dias_parado:n('cfg_dias',1,365),tarefa_pesquisa:d.has('cfg_tarefa_pesquisa'),followup:d.has('cfg_followup')};
+}
+function aplicarModelo(){
+ const form=document.getElementById('operationForm');if(!form)return;
+ const m=MODELO_MARKETING_MEDICO,set=(k,v)=>{if(form.elements[k])form.elements[k].value=v};
+ set('cfg_cnaes',m.cnaes.map(c=>cnaeFmt(c)+' — '+m.cnaes_rotulos[c]).join('\n'));
+ set('cfg_segmentos',m.segmentos.join(', '));set('cfg_especialidades',m.especialidades.join(', '));set('cfg_ufs','');
+ set('cfg_p_cnae',m.pesos.cnae);set('cfg_p_segmento',m.pesos.segmento);set('cfg_p_especialidade',m.pesos.especialidade);
+ set('cfg_p_regiao',m.pesos.regiao);set('cfg_p_privado',m.pesos.privado);set('cfg_limite_a',m.limites.A);
+ set('cfg_s_icp',m.score.icp);set('cfg_s_eng',m.score.engajamento);
+ if(form.elements.segment&&!form.elements.segment.value)form.elements.segment.value='Marketing médico e posicionamento estratégico';
+ C.toast('Modelo aplicado. Revise e clique em Salvar operação.');
 }
 async function submit(e){
  if(e.target.id!=='operationForm')return;
@@ -92,8 +142,10 @@ async function submit(e){
   if(mail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail))throw Error('E-mail inválido.');
   if(setup!==null&&(!Number.isFinite(setup)||setup<0))throw Error('Setup inválido.');
   if(comm!==null&&(!Number.isFinite(comm)||comm<0||comm>100))throw Error('Comissão deve ser entre 0% e 100%.');
+  const anterior=modal?ops().find(o=>o.id===modal):null;
   const record={name,segment:v('segment'),service_type:v('service_type'),contact_name:v('contact_name'),
-   contact_email:mail,setup_value:setup,commission_percent:comm,status,notes:v('notes'),updated_at:new Date().toISOString()};
+   contact_email:mail,setup_value:setup,commission_percent:comm,status,notes:v('notes'),updated_at:new Date().toISOString(),
+   closing_requirement:v('closing_requirement')||null,commercial_config:lerRegras(d,anterior?.commercial_config)};
   const q=modal?C.db.from('jadem_client_operations').update(record).eq('id',modal):
     C.db.from('jadem_client_operations').insert({...record,owner_id:C.state.user.id});
   const {error}=await q;if(error)throw error;
@@ -108,6 +160,7 @@ function click(e){
  else if(op==='close'){modal=null;C.render()}
  else if(op.startsWith('edit:')){modal=op.slice(5);C.render()}
  else if(op.startsWith('open:'))move(op.slice(5));
+ else if(op==='modelo-medico')aplicarModelo();
 }
 function change(e){if(e.target.matches('[data-operation-choose]'))move(e.target.value)}
 export function setupOperations(ctx){C=ctx;document.addEventListener('click',click);document.addEventListener('change',change);document.addEventListener('submit',submit)}
