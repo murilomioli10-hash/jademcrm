@@ -8,9 +8,26 @@ const scoped=['companies','people','deals','tasks','activities','leads','meeting
 const related=['leadEvents','recordings','shares','assignments','stageHistory'];
 const states=['Implantação','Ativa','Pausada','Encerrada'];
 function key(){return 'jadem_op_'+C.state.user.id}
+/* ?operacao=<id>&operacao_nome=<nome>: o escritório abre o CRM já na operação do
+   andar (cada cliente vê a dele); ?operacao=todas volta para todas. Vale uma vez
+   e sai da URL; a escolha fica lembrada como se a pessoa tivesse escolhido. */
+let urlLida=false;
+const semAcento=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+function pedidoDaUrl(){
+ if(urlLida)return;
+ const p=new URLSearchParams(location.search),id=p.get('operacao'),nome=semAcento(p.get('operacao_nome'));
+ if(id===null&&!nome){urlLida=true;return}
+ if(!ops().length&&id!=='todas')return;   // espera as operações carregarem
+ urlLida=true;
+ const op=id==='todas'?null:(ops().find(o=>o.id===id)||(nome?ops().find(o=>semAcento(o.name)===nome)||ops().find(o=>semAcento(o.name).includes(nome)||nome.includes(semAcento(o.name))):null));
+ if(op||id==='todas'){C.state.activeOperation=op?op.id:'';try{localStorage.setItem(key(),C.state.activeOperation)}catch{}}
+ else C.toast&&setTimeout(()=>C.toast('Operação "'+(p.get('operacao_nome')||id)+'" não encontrada no CRM.'),300);
+ const u=new URL(location.href);u.searchParams.delete('operacao');u.searchParams.delete('operacao_nome');history.replaceState({},'',u.pathname+u.search+u.hash);
+}
 export function scopeOperations(){
  if(!C?.state.user)return;
  if(user!==C.state.user.id){user=C.state.user.id;try{C.state.activeOperation=localStorage.getItem(key())||''}catch{C.state.activeOperation=''}}
+ pedidoDaUrl();
  let id=C.state.activeOperation||'';
  if(id&&id!=='unassigned'&&!ops().some(o=>o.id===id)){id='';C.state.activeOperation=''}
  const d={...full()};
