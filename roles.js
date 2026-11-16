@@ -234,11 +234,17 @@ function telaFunil(o){
 export function clientFunil(){
  if(roleIdentity()!=='CLIENTE')return C.title('Acesso restrito','Esta visão é dos usuários do tipo Cliente.');
  if(!funil&&!funilCarregando)carregarFunil();
- const topo=C.title('Funil de vendas','Onde está cada lead da sua operação, da prospecção ao fechamento.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>')
-  +'<div class="cl-barra"><span class="note" style="margin:0 auto 0 0">Arraste o quadro para os lados ou use as setas.</span>'
+ const topo=C.title('Funil de vendas','Onde está cada lead da sua operação, da prospecção ao fechamento.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>')+barraQuadro();
+ if(!funil)return topo+'<div class="card module"><p>Carregando o funil…</p></div>';
+ return funilPronto(topo);
+}
+// a barra do quadro (setas e zoom): no funil do cliente e no do Admin
+export function barraQuadro(){
+ return '<div class="cl-barra"><span class="note" style="margin:0 auto 0 0">Arraste o quadro para os lados ou use as setas.</span>'
   +'<button class="btn outline sm" data-role="rolar-" title="Voltar etapas" aria-label="Voltar etapas">‹</button><button class="btn outline sm" data-role="rolar+" title="Avançar etapas" aria-label="Avançar etapas">›</button>'
   +'<span class="cl-sep"></span><button class="btn outline sm" data-role="zoom-" title="Diminuir" aria-label="Diminuir o zoom">−</button><button class="btn outline sm" data-role="zoom0" title="Tamanho normal" data-cl-zoom>'+Math.round(zoom*100)+'%</button><button class="btn outline sm" data-role="zoom+" title="Aumentar" aria-label="Aumentar o zoom">+</button></div>';
- if(!funil)return topo+'<div class="card module"><p>Carregando o funil…</p></div>';
+}
+function funilPronto(topo){
  if(funil.erro)return topo+'<div class="notice">Não foi possível carregar o funil: '+E(funil.erro)+'.</div>';
  if(!funil.length)return topo+'<div class="card module"><h2>Nenhuma operação liberada</h2><p>Seu acesso ainda não foi ligado a uma operação. Fale com a Mioli Consultoria.</p></div>';
  return topo+funil.map(telaFunil).join('')+'<p class="note">Os leads e negócios são atualizados pela equipe da Mioli. Telefones, e-mails e anotações ficam com a equipe.</p>';
@@ -282,3 +288,4 @@ function arrastarQuadro(){
  document.addEventListener('mousemove',e=>{if(!a)return;const dx=e.clientX-a.x;if(Math.abs(dx)>3)a.moveu=true;if(a.moveu){a.k.scrollLeft=a.l-dx;e.preventDefault()}});
  document.addEventListener('mouseup',()=>{if(a){a.k.classList.remove('arrastando');a=null}});
 }
+export {estiloZoom};
