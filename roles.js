@@ -28,7 +28,7 @@ export function roleCanView(v){
 }
 export function roleHome(){const r=roleIdentity();return r==='SDR'?'sdr':r==='CLOSER'?'closer':r==='CLIENTE'?'cliente':r==='IA'?'leads':'gestao'}
 export function roleAutoView(){if(C.state.view==='dashboard'||!roleCanView(C.state.view))C.state.view=roleHome()}
-export function setupRoles(ctx){C=ctx;document.addEventListener('click',clicked);document.addEventListener('submit',submitted);document.addEventListener('change',changed);document.addEventListener('input',filtrarLeads);document.addEventListener('change',filtrarLeads)}
+export function setupRoles(ctx){C=ctx;document.addEventListener('click',clicked);document.addEventListener('submit',submitted);document.addEventListener('change',changed);document.addEventListener('input',filtrarLeads);document.addEventListener('change',filtrarLeads);arrastarQuadro()}
 function bounds(p){const today=new Date(),begin=new Date(today.getFullYear(),today.getMonth(),today.getDate());if(p==='week')begin.setDate(begin.getDate()-(begin.getDay()+6)%7);if(p==='month')begin.setDate(1);const end=new Date(begin);if(p==='day')end.setDate(end.getDate()+1);if(p==='week')end.setDate(end.getDate()+7);if(p==='month')end.setMonth(end.getMonth()+1);return [begin.getTime(),end.getTime()]}
 function scoped(m){
  const uid=C.state.user.id;
@@ -175,6 +175,8 @@ async function clicked(e){
  if(action==='close'){modal=null;C.render();return}
  if(action==='team'||action==='calendar'){C.state.view=action;C.render();return}
  if(action==='painel'){painel=null;funil=null;C.render();return}
+ if(action==='zoom-'||action==='zoom+'||action==='zoom0'){mudarZoom(action);return}
+ if(action==='rolar-'||action==='rolar+'){document.querySelectorAll('.cl-rolagem').forEach(k=>k.scrollBy({left:(action==='rolar+'?1:-1)*k.clientWidth*.8}));return}
  if(action==='copiar'&&modal?.senha){try{await navigator.clipboard.writeText(modal.senha);C.toast('Senha copiada.')}catch(e){C.toast('Selecione a senha e copie.')}return}
  if(roleIdentity()!=='GESTAO')return;
  if(action==='new'){modal={type:'new'};C.render()}
@@ -219,20 +221,23 @@ function cartaoLead(l){
 function telaFunil(o){
  const L=o.leads||[],N=o.negocios||[];
  let h='<div class="sectionhead" style="padding:0 0 12px;border:0"><h2>'+E(o.operacao)+'</h2><span>'+E(L.length)+' leads · atualizado '+C.fmt(o.atualizado_em,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>'
-  +'<div class="kanban">'+ETAPAS.map(st=>{const da=L.filter(l=>l.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
+  +'<div class="cl-rolagem"><div class="kanban cl-kanban" style="'+estiloZoom()+'">'+ETAPAS.map(st=>{const da=L.filter(l=>l.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
    +da.slice(0,POR_COLUNA).map(cartaoLead).join('')
    +(da.length>POR_COLUNA?'<p class="muted" style="text-align:center;margin:12px 4px">+ '+(da.length-POR_COLUNA)+' nesta etapa · veja todos em Painel da operação</p>':'')
-   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem leads</p>')+'</div>'}).join('')+'</div>';
+   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem leads</p>')+'</div>'}).join('')+'</div></div>';
  if(N.length)h+='<div class="sectionhead" style="padding:22px 0 12px;border:0"><h2>Negócios</h2><span>'+E(N.length)+' · '+E(reais(N.filter(d=>d.etapa!=='Perdido').reduce((s,d)=>s+Number(d.valor||0),0)))+' em aberto e ganhos</span></div>'
-  +'<div class="kanban">'+ETAPAS_NEGOCIO.map(st=>{const da=N.filter(d=>d.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
+  +'<div class="cl-rolagem"><div class="kanban cl-kanban" style="'+estiloZoom()+'">'+ETAPAS_NEGOCIO.map(st=>{const da=N.filter(d=>d.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
    +da.map(d=>'<div class="dealcard"><strong>'+E(d.titulo)+'</strong><div class="companyname">'+E(d.empresa||'—')+'</div><div class="dealamount">'+E(reais(d.valor))+'</div>'+(d.previsao?'<div class="note" style="margin:4px 0 0">Previsão: '+E(dataCurta(d.previsao))+'</div>':'')+'</div>').join('')
-   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem negócios</p>')+'</div>'}).join('')+'</div>';
+   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem negócios</p>')+'</div>'}).join('')+'</div></div>';
  return h;
 }
 export function clientFunil(){
  if(roleIdentity()!=='CLIENTE')return C.title('Acesso restrito','Esta visão é dos usuários do tipo Cliente.');
  if(!funil&&!funilCarregando)carregarFunil();
- const topo=C.title('Funil de vendas','Onde está cada lead da sua operação, da prospecção ao fechamento.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>');
+ const topo=C.title('Funil de vendas','Onde está cada lead da sua operação, da prospecção ao fechamento.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>')
+  +'<div class="cl-barra"><span class="note" style="margin:0 auto 0 0">Arraste o quadro para os lados ou use as setas.</span>'
+  +'<button class="btn outline sm" data-role="rolar-" title="Voltar etapas" aria-label="Voltar etapas">‹</button><button class="btn outline sm" data-role="rolar+" title="Avançar etapas" aria-label="Avançar etapas">›</button>'
+  +'<span class="cl-sep"></span><button class="btn outline sm" data-role="zoom-" title="Diminuir" aria-label="Diminuir o zoom">−</button><button class="btn outline sm" data-role="zoom0" title="Tamanho normal" data-cl-zoom>'+Math.round(zoom*100)+'%</button><button class="btn outline sm" data-role="zoom+" title="Aumentar" aria-label="Aumentar o zoom">+</button></div>';
  if(!funil)return topo+'<div class="card module"><p>Carregando o funil…</p></div>';
  if(funil.erro)return topo+'<div class="notice">Não foi possível carregar o funil: '+E(funil.erro)+'.</div>';
  if(!funil.length)return topo+'<div class="card module"><h2>Nenhuma operação liberada</h2><p>Seu acesso ainda não foi ligado a uma operação. Fale com a Mioli Consultoria.</p></div>';
@@ -258,4 +263,22 @@ function filtrarLeads(e){
  const card=e.target.closest('.card'),q=val(card.querySelector('[data-cl-busca]').value),et=card.querySelector('[data-cl-etapa]').value;let n=0;
  card.querySelectorAll('[data-cl-linha]').forEach(tr=>{const ok=(!et||tr.dataset.etapa===et)&&(!q||tr.dataset.busca.includes(q));tr.hidden=!ok;if(ok)n++});
  card.querySelector('[data-cl-conta]').textContent=n+' leads';
+}
+
+/* zoom do funil do cliente (fica guardado neste navegador) e arrastar o quadro com o mouse */
+const ZOOMS=[.5,.6,.7,.8,.9,1,1.1,1.25];
+let zoom=1;try{const z=Number(localStorage.getItem('jadem-funil-zoom'));if(ZOOMS.includes(z))zoom=z}catch(e){}
+// a altura das colunas compensa o zoom, para o quadro caber na tela e a barra para os lados ficar à vista
+function estiloZoom(){const alt=Math.max(320,Math.round(((typeof innerHeight==='number'?innerHeight:900)-300)/zoom));return 'zoom:'+zoom+';--cl-alt:'+alt+'px'}
+function mudarZoom(a){
+ const i=ZOOMS.indexOf(zoom);zoom=a==='zoom0'?1:ZOOMS[Math.max(0,Math.min(ZOOMS.length-1,i+(a==='zoom+'?1:-1)))];
+ try{localStorage.setItem('jadem-funil-zoom',String(zoom))}catch(e){}
+ const st=estiloZoom();document.querySelectorAll('.cl-kanban').forEach(k=>{k.setAttribute('style',st)});
+ document.querySelectorAll('[data-cl-zoom]').forEach(b=>{b.textContent=Math.round(zoom*100)+'%'});
+}
+function arrastarQuadro(){
+ let a=null;
+ document.addEventListener('mousedown',e=>{const k=e.target.closest&&e.target.closest('.cl-rolagem');if(!k||e.button!==0||e.target.closest('button,a,input,select'))return;a={k,x:e.clientX,l:k.scrollLeft,moveu:false};k.classList.add('arrastando')});
+ document.addEventListener('mousemove',e=>{if(!a)return;const dx=e.clientX-a.x;if(Math.abs(dx)>3)a.moveu=true;if(a.moveu){a.k.scrollLeft=a.l-dx;e.preventDefault()}});
+ document.addEventListener('mouseup',()=>{if(a){a.k.classList.remove('arrastando');a=null}});
 }

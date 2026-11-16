@@ -140,3 +140,13 @@
 @media(max-width:560px){.jadem-lead-screen .info-secao .detailgrid.info-grid{grid-template-columns:1fr}.lf select{min-width:0;max-width:none;width:100%}.lf{flex:1 1 45%}}
 .op-regras{grid-column:1/-1;margin:14px 0 4px;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px;background:#fbfdff}
 .op-regras summary{cursor:pointer;font-size:13px;color:#1a283e}
+
+/* funil do cliente: colunas com rolagem própria, zoom e arrastar para os lados */
+.cl-barra{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.cl-barra .btn{min-width:38px;justify-content:center}
+.cl-sep{width:1px;height:24px;background:#dbe3ec;margin:0 4px}
+.cl-rolagem{overflow-x:auto;padding-bottom:12px;cursor:grab;user-select:none}
+.cl-rolagem.arrastando{cursor:grabbing}
+.cl-rolagem .cl-kanban{overflow:visible;width:max-content;padding-bottom:0}
+.cl-kanban .kanbancol{max-height:var(--cl-alt,70vh);overflow-y:auto;overscroll-behavior:contain}
+.cl-kanban .kanbanhead{position:sticky;top:-13px;background:#eef2f6;z-index:1;margin:-13px -13px 0;padding:19px 16px 13px;border-radius:14px 14px 0 0}
