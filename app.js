@@ -103,7 +103,7 @@ if(a.hasAttribute('data-auth')){state.authMode=a.dataset.auth;state.authNotice='
 if(a.hasAttribute('data-open')){state.modal={kind:a.dataset.open,id:null};render();return}
 if(a.hasAttribute('data-edit')){state.modal={kind:a.dataset.edit,id:a.dataset.id};render();return}
 if(a.hasAttribute('data-del')){await remove(a.dataset.del,a.dataset.id);return}
-if(a.hasAttribute('data-logout')){await db.auth.signOut();state.user=null;if(state.primeiro){state.authMode='login';state.primeiro=false}render();return}
+if(a.hasAttribute('data-logout')){await db.auth.signOut({scope:"local"});state.user=null;if(state.primeiro){state.authMode='login';state.primeiro=false}render();return}
 if(a.hasAttribute('data-task')){let row=state.data.tasks.find(t=>t.id===a.dataset.task);if(!row)return;try{await mutate('tasks',{done:!row.done},row.id)}catch(err){toast(err.message)}return}
 if(a.hasAttribute('data-wa')){let digits=dial(a.dataset.wa);if(digits)window.open('https://wa.me/'+digits,'_blank','noopener');return}
 if(a.hasAttribute('data-job-open')){let j=state.data.send.find(x=>x.id===a.dataset.jobOpen);if(!j||j.status!=='Agendado'||Date.now()<new Date(j.scheduled_at).getTime()||!j.consent_confirmed)return toast('Mensagem ainda não habilitada.');window.open('https://wa.me/'+dial(j.phone)+'?text='+encodeURIComponent(j.message),'_blank','noopener');return}
