@@ -15,12 +15,12 @@ export function roleIdentity(){
 // tipos de usuário: GESTAO é o Admin (a conta dona dos dados)
 export const ROLE_LABEL={GESTAO:'Admin',SDR:'SDR',CLOSER:'Closer',CLIENTE:'Cliente',IA:'Escritório IA'};
 const ROLE_INFO={SDR:'Prospecção e agendamento. Vê só os leads distribuídos para ele.',CLOSER:'Reuniões e fechamento. Vê só os leads distribuídos para ele.',
- CLIENTE:'A empresa que contratou a Mioli. Vê só o painel de números da operação dela, sem a lista de leads.',
+ CLIENTE:'A empresa que contratou a Mioli. Vê o painel, o funil de vendas e acompanha os leads da operação dela, sem telefone, e-mail ou anotações.',
  IA:'O login das IAs do escritório (Jarvis, Secretária, Diretor Comercial, Eloá). Lê tudo; cria e altera leads, tarefas, reuniões e ligações; não apaga nada.'};
 export const roleLabel=r=>ROLE_LABEL[r||roleIdentity()]||r;
 const VIEWS={SDR:['sdr','leads','calendar','tasks','activities','settings','connect','send','warmup','callQueue'],
  CLOSER:['closer','leads','calendar','tasks','activities','settings','deals','callQueue'],
- CLIENTE:['cliente','settings'],
+ CLIENTE:['cliente','deals','settings'],
  IA:['dashboard','clientOperations','companies','leads','people','deals','callQueue','tasks','calendar','activities','reports','notifications','settings']};
 export function roleCanView(v){
  const r=roleIdentity();if(r==='GESTAO')return v!=='cliente';
@@ -28,7 +28,7 @@ export function roleCanView(v){
 }
 export function roleHome(){const r=roleIdentity();return r==='SDR'?'sdr':r==='CLOSER'?'closer':r==='CLIENTE'?'cliente':r==='IA'?'leads':'gestao'}
 export function roleAutoView(){if(C.state.view==='dashboard'||!roleCanView(C.state.view))C.state.view=roleHome()}
-export function setupRoles(ctx){C=ctx;document.addEventListener('click',clicked);document.addEventListener('submit',submitted);document.addEventListener('change',changed)}
+export function setupRoles(ctx){C=ctx;document.addEventListener('click',clicked);document.addEventListener('submit',submitted);document.addEventListener('change',changed);document.addEventListener('input',filtrarLeads);document.addEventListener('change',filtrarLeads)}
 function bounds(p){const today=new Date(),begin=new Date(today.getFullYear(),today.getMonth(),today.getDate());if(p==='week')begin.setDate(begin.getDate()-(begin.getDay()+6)%7);if(p==='month')begin.setDate(1);const end=new Date(begin);if(p==='day')end.setDate(end.getDate()+1);if(p==='week')end.setDate(end.getDate()+7);if(p==='month')end.setMonth(end.getMonth()+1);return [begin.getTime(),end.getTime()]}
 function scoped(m){
  const uid=C.state.user.id;
@@ -77,7 +77,8 @@ export function clientView(){
   +'<div class="grid4" style="margin-bottom:15px">'+card('Leads na operação',o.leads,o.leads_novos_30d+' novos em 30 dias')+card('Ligações',o.ligacoes_30d,o.ligacoes_7d+' nos últimos 7 dias')+card('Ligações atendidas',o.atendidas_30d,'Taxa de atendimento '+taxa(o.atendidas_30d,o.ligacoes_30d))+card('Próximas reuniões',o.proximas_reunioes,'Agendadas daqui para frente')+'</div>'
   +'<div class="grid4" style="margin-bottom:15px">'+card('Reuniões agendadas',o.reunioes_agendadas_30d)+card('Reuniões realizadas',o.reunioes_realizadas_30d,'Comparecimento '+taxa(o.reunioes_realizadas_30d,o.reunioes_realizadas_30d+o.faltas_30d))+card('Faltas',o.faltas_30d)+card('Vendas',o.vendas_30d,'Conversão '+taxa(o.vendas_30d,o.reunioes_realizadas_30d))+'</div>'
   +'<div class="card" style="margin-bottom:26px"><div class="sectionhead"><h2>Leads por etapa</h2></div><div class="cardbody">'+(Object.keys(o.leads_por_etapa||{}).length?Object.entries(o.leads_por_etapa).map(([k,n])=>'<div class="settingsrow"><div><strong>'+E(k)+'</strong></div><b>'+E(n)+'</b></div>').join(''):'<p class="note">Ainda sem leads.</p>')+'</div></div>').join('')
-  +'<p class="note">Você vê só os números consolidados. Os dados dos contatos ficam com a equipe da Mioli.</p>';
+  +acompanharLeads()
+  +'<p class="note">Telefones, e-mails e anotações dos contatos ficam com a equipe da Mioli.</p>';
 }
 const opName=id=>items('clientOperations').find(o=>o.id===id)?.name||'—';
 // cartão de Usuários nas Configurações (só o Admin)
@@ -173,7 +174,7 @@ async function clicked(e){
  const b=e.target.closest('[data-role]');if(!b)return;const action=b.dataset.role;
  if(action==='close'){modal=null;C.render();return}
  if(action==='team'||action==='calendar'){C.state.view=action;C.render();return}
- if(action==='painel'){painel=null;C.render();return}
+ if(action==='painel'){painel=null;funil=null;C.render();return}
  if(action==='copiar'&&modal?.senha){try{await navigator.clipboard.writeText(modal.senha);C.toast('Senha copiada.')}catch(e){C.toast('Selecione a senha e copie.')}return}
  if(roleIdentity()!=='GESTAO')return;
  if(action==='new'){modal={type:'new'};C.render()}
@@ -190,4 +191,71 @@ async function clicked(e){
   const x=items('roster').find(z=>z.id===action.split(':')[1]);if(!x||val(x.member_email)===me())return;
   const r=await C.db.from('jadem_team_roster').update({active:!x.active}).eq('id',x.id);if(r.error)C.toast(r.error.message);else await C.load();
  }
+}
+
+/* ===========================================================
+   Cliente: funil de vendas e acompanhamento dos leads da operação.
+   Vem da função jadem_funil_cliente() (004_cliente_funil.sql): sem
+   telefone, e-mail, CNPJ, endereço, nome do decisor nem anotações.
+   =========================================================== */
+const ETAPAS=['Novo lead','Pesquisa e enriquecimento','Prospecção iniciada','Contato estabelecido','Em qualificação','Qualificado','Reunião agendada','Reunião realizada','Proposta enviada','Negociação','Fechado — ganho','Fechado — perdido'];
+const ETAPAS_NEGOCIO=['Novo','Contato','Qualificado','Proposta','Negociação','Ganho','Perdido'];
+const POR_COLUNA=30;
+let funil=null,funilCarregando=false;
+async function carregarFunil(){
+ funilCarregando=true;const r=await C.db.rpc('jadem_funil_cliente');funilCarregando=false;
+ funil=r.error?{erro:/jadem_funil_cliente|PGRST202|does not exist/i.test(r.error.message+(r.error.code||''))?'o acompanhamento ainda não foi liberado pela Mioli':r.error.message}:(r.data||[]);C.render();
+}
+const dias=t=>{if(!t)return null;const d=Math.floor((Date.now()-new Date(t).getTime())/864e5);return d<=0?'hoje':d===1?'há 1 dia':'há '+d+' dias'};
+const dataCurta=t=>t?C.fmt(t,{day:'2-digit',month:'short'}):'—';
+const reais=x=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}).format(Number(x)||0);
+function corInteresse(i){return i==='Alto'?'#0f7b4d':i==='Médio'?'#a86700':i==='Baixo'?'#64748b':i==='Sem interesse'?'#b42318':'#94a3b8'}
+function cartaoLead(l){
+ return '<div class="dealcard" title="'+E(l.etapa)+'"><strong>'+E(l.empresa)+'</strong>'
+  +'<div class="companyname">'+E([l.cidade,l.segmento].filter(Boolean).join(' · ')||'—')+'</div>'
+  +'<div class="note" style="margin:6px 0 0"><span style="color:'+corInteresse(l.interesse)+';font-weight:700">● '+E(l.interesse||'Não avaliado')+'</span> · '+E(dias(l.etapa_desde)?'nesta etapa '+dias(l.etapa_desde):'')+'</div>'
+  +(l.proximo_passo?'<div class="note" style="margin:4px 0 0">Próximo: '+E(l.proximo_passo)+(l.proximo_em?' · '+E(dataCurta(l.proximo_em)):'')+'</div>':'')+'</div>';
+}
+function telaFunil(o){
+ const L=o.leads||[],N=o.negocios||[];
+ let h='<div class="sectionhead" style="padding:0 0 12px;border:0"><h2>'+E(o.operacao)+'</h2><span>'+E(L.length)+' leads · atualizado '+C.fmt(o.atualizado_em,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>'
+  +'<div class="kanban">'+ETAPAS.map(st=>{const da=L.filter(l=>l.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
+   +da.slice(0,POR_COLUNA).map(cartaoLead).join('')
+   +(da.length>POR_COLUNA?'<p class="muted" style="text-align:center;margin:12px 4px">+ '+(da.length-POR_COLUNA)+' nesta etapa · veja todos em Painel da operação</p>':'')
+   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem leads</p>')+'</div>'}).join('')+'</div>';
+ if(N.length)h+='<div class="sectionhead" style="padding:22px 0 12px;border:0"><h2>Negócios</h2><span>'+E(N.length)+' · '+E(reais(N.filter(d=>d.etapa!=='Perdido').reduce((s,d)=>s+Number(d.valor||0),0)))+' em aberto e ganhos</span></div>'
+  +'<div class="kanban">'+ETAPAS_NEGOCIO.map(st=>{const da=N.filter(d=>d.etapa===st);return '<div class="kanbancol"><div class="kanbanhead">'+E(st)+' <span class="num">'+da.length+'</span></div>'
+   +da.map(d=>'<div class="dealcard"><strong>'+E(d.titulo)+'</strong><div class="companyname">'+E(d.empresa||'—')+'</div><div class="dealamount">'+E(reais(d.valor))+'</div>'+(d.previsao?'<div class="note" style="margin:4px 0 0">Previsão: '+E(dataCurta(d.previsao))+'</div>':'')+'</div>').join('')
+   +(da.length?'':'<p class="muted" style="text-align:center;margin:22px 4px">Sem negócios</p>')+'</div>'}).join('')+'</div>';
+ return h;
+}
+export function clientFunil(){
+ if(roleIdentity()!=='CLIENTE')return C.title('Acesso restrito','Esta visão é dos usuários do tipo Cliente.');
+ if(!funil&&!funilCarregando)carregarFunil();
+ const topo=C.title('Funil de vendas','Onde está cada lead da sua operação, da prospecção ao fechamento.','<button class="btn outline" data-role="painel">'+C.ic('activity')+' Atualizar</button>');
+ if(!funil)return topo+'<div class="card module"><p>Carregando o funil…</p></div>';
+ if(funil.erro)return topo+'<div class="notice">Não foi possível carregar o funil: '+E(funil.erro)+'.</div>';
+ if(!funil.length)return topo+'<div class="card module"><h2>Nenhuma operação liberada</h2><p>Seu acesso ainda não foi ligado a uma operação. Fale com a Mioli Consultoria.</p></div>';
+ return topo+funil.map(telaFunil).join('')+'<p class="note">Os leads e negócios são atualizados pela equipe da Mioli. Telefones, e-mails e anotações ficam com a equipe.</p>';
+}
+// Painel da operação: lista para acompanhar cada lead, com busca e etapa
+function acompanharLeads(){
+ if(!funil&&!funilCarregando)carregarFunil();
+ if(!funil)return '<div class="card module" style="margin-bottom:18px"><p>Carregando os leads…</p></div>';
+ if(funil.erro)return '<div class="notice" style="margin-bottom:18px">Acompanhamento dos leads: '+E(funil.erro)+'.</div>';
+ return funil.map(o=>{const L=o.leads||[];if(!L.length)return '';
+  return '<div class="card" style="margin-bottom:22px"><div class="sectionhead"><h2>Acompanhar leads · '+E(o.operacao)+'</h2><span data-cl-conta>'+L.length+' leads</span></div><div class="cardbody">'
+   +'<div class="flexrow" style="gap:10px;flex-wrap:wrap;margin-bottom:12px"><input data-cl-busca placeholder="Buscar empresa, cidade ou segmento" style="flex:1;min-width:200px;padding:10px 12px;border:1px solid #dbe3ec;border-radius:10px;font:inherit">'
+   +'<select data-cl-etapa style="padding:10px 12px;border:1px solid #dbe3ec;border-radius:10px;font:inherit"><option value="">Todas as etapas</option>'+ETAPAS.map(s=>'<option>'+E(s)+'</option>').join('')+'</select></div>'
+   +'<div class="tablewrap"><table class="datatable"><thead><tr><th>Empresa</th><th>Cidade</th><th>Etapa</th><th>Interesse</th><th>Última interação</th><th>Próximo passo</th></tr></thead><tbody>'
+   +L.map(l=>'<tr data-cl-linha data-etapa="'+E(l.etapa)+'" data-busca="'+E([l.empresa,l.cidade,l.segmento].join(' ').toLowerCase())+'"><td><strong>'+E(l.empresa)+'</strong><div class="note" style="margin:2px 0 0">'+E(l.segmento||'')+'</div></td><td>'+E(l.cidade||'—')+'</td><td>'+E(l.etapa)+'<div class="note" style="margin:2px 0 0">'+E(dias(l.etapa_desde)||'')+'</div></td>'
+    +'<td><span style="color:'+corInteresse(l.interesse)+';font-weight:700">● '+E(l.interesse||'Não avaliado')+'</span></td><td>'+E(l.ultima_interacao?dataCurta(l.ultima_interacao)+' · '+dias(l.ultima_interacao):'—')+'</td><td>'+E(l.proximo_passo||'—')+(l.proximo_em?'<div class="note" style="margin:2px 0 0">'+E(dataCurta(l.proximo_em))+'</div>':'')+'</td></tr>').join('')
+   +'</tbody></table></div></div></div>'}).join('');
+}
+// a busca e a etapa filtram a tabela na hora, sem redesenhar a página
+function filtrarLeads(e){
+ if(!e.target.matches||!e.target.matches('[data-cl-busca],[data-cl-etapa]'))return;
+ const card=e.target.closest('.card'),q=val(card.querySelector('[data-cl-busca]').value),et=card.querySelector('[data-cl-etapa]').value;let n=0;
+ card.querySelectorAll('[data-cl-linha]').forEach(tr=>{const ok=(!et||tr.dataset.etapa===et)&&(!q||tr.dataset.busca.includes(q));tr.hidden=!ok;if(ok)n++});
+ card.querySelector('[data-cl-conta]').textContent=n+' leads';
 }
