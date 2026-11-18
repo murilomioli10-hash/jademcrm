@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.110.6';
 import {setupFeatures,leadsView,calendarView,callLibraryView,featuresOverlay} from './features.js';
-import {setupRoles,rolesView,teamView,rolesOverlay,roleCanView,roleAutoView,roleHome,roleLabel,clientView,usersCard,clientFunil,barraQuadro,estiloZoom} from './roles.js';
+import {setupRoles,rolesView,teamView,rolesOverlay,roleCanView,roleAutoView,roleHome,roleLabel,clientView,usersCard,clientFunil,barraQuadro,estiloZoom,atualizarCliente} from './roles.js';
 import {setupGoogle,googleOverlay} from './google.js';
 import {setupAgenda,agendaBoard,agendaAlertsButton,agendaAlertsView} from './agenda.js';
 import {setupWarmup,warmupView} from './warmup.js';
@@ -90,7 +90,7 @@ return '<div class="overlay" data-closeoverlay><div class="modal"><div class="mo
 function applyIncoming(){const p=new URLSearchParams((window.location.hash.startsWith('#connect_')?window.location.hash.slice(1):window.location.search.slice(1)));const name=(p.get('connect_name')||'').trim();if(!state.user||!name)return;const company=(p.get('connect_company')||'').trim();const match=state.data.companies.find(c=>c.name.trim().toLowerCase()===company.toLowerCase());state.modal={kind:'people',id:null,prefill:{name,phone:p.get('connect_phone')||'',company_id:match?.id||null}};window.history.replaceState({},'',window.location.pathname);}
 // o banco devolve no máximo 1.000 linhas por pedido: lê de mil em mil até acabar (id desempata quem tem o mesmo horário)
 async function lerTudo(t){let out=[];for(let de=0;de<200000;de+=1000){const r=await db.from(t).select('*').order('created_at',{ascending:false}).order('id',{ascending:true}).range(de,de+999);if(r.error)return {error:r.error};out=out.concat(r.data||[]);if((r.data||[]).length<1000)break}return {data:out}}
-async function load(){let keys=Object.keys(names);let results=await Promise.all(keys.map(k=>lerTudo(names[k])));let errors=results.filter(r=>r.error).map(r=>r.error.message);if(errors.length){state.error=errors.join('; ');toast('Erro ao consultar o banco. Confira o acesso e tente novamente.');}keys.forEach((k,i)=>{if(!results[i].error)state.data[k]=results[i].data||[]});applyIncoming();state.rawData={...state.data};scopeOperations();roleAutoView();render()}
+async function load(){let keys=Object.keys(names);let results=await Promise.all(keys.map(k=>lerTudo(names[k])));let errors=results.filter(r=>r.error).map(r=>r.error.message);if(errors.length){state.error=errors.join('; ');toast('Erro ao consultar o banco. Confira o acesso e tente novamente.');}keys.forEach((k,i)=>{if(!results[i].error)state.data[k]=results[i].data||[]});applyIncoming();state.rawData={...state.data};scopeOperations();roleAutoView();ultimaCarga=Date.now();render()}
 async function mutate(k,payload,id){if(!id&&['companies','people','deals','tasks','activities','send'].includes(k)){const chosen=state.activeOperation;payload={...payload,operation_id:chosen&&chosen!=='unassigned'?chosen:null}}let query=id?db.from(names[k]).update(payload).eq('id',id):db.from(names[k]).insert(payload);const {error}=await query;if(error)throw error;await load()}
 async function remove(k,id){if(!window.confirm('Excluir este registro? Essa ação não poderá ser desfeita.'))return;let {error}=await db.from(names[k]).delete().eq('id',id);if(error)toast(error.message);else {toast('Registro excluído.');await load()}}
 function exportData(){let info={app:'JADEM CRM',version:'1.0',exported_at:new Date().toISOString(),data:state.data};let data=new Blob([JSON.stringify(info,null,2)],{type:'application/json'});let url=URL.createObjectURL(data);let a=document.createElement('a');a.href=url;a.download='jadem-crm-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(url)}
@@ -130,4 +130,22 @@ try{await mutate(k,vals,id);state.modal=null;toast(id?'Registro atualizado.':'Re
 async function init(){try{let {data,error}=await db.auth.getUser();if(error&&error.name!=='AuthSessionMissingError')console.warn(error.message);state.user=data?.user||null;if(precisaTrocar(state.user)){state.authMode='recovery';state.primeiro=true}if(state.authMode==='recovery'&&!state.user){state.authMode='login';state.authNotice='O link de recuperação expirou ou já foi usado. Peça um novo em "Esqueci minha senha".'}state.ready=true;render();if(state.user&&state.authMode!=='recovery')await load();db.auth.onAuthStateChange((ev,s)=>{if(ev==='PASSWORD_RECOVERY'){state.authMode='recovery';state.authNotice='';render()}let uid=s?.user?.id||null;if(uid!==state.user?.id){state.user=s?.user||null;if(precisaTrocar(state.user)){state.authMode='recovery';state.primeiro=true}if(!state.user&&state.primeiro){state.authMode='login';state.primeiro=false}state.data={companies:[],people:[],deals:[],tasks:[],activities:[],send:[],leads:[],leadEvents:[],recordings:[],meetings:[]};state.view='dashboard';render();if(uid&&state.authMode!=='recovery')load()}});}catch(err){state.ready=true;state.authNotice='Falha na conexão. Atualize a página e tente novamente.';render();console.error(err)}}
 const ctx={state,db,opAtiva,render,load,toast,ic,title,inp,sel,area,esc,money,fmt,dateInput,badge,companyName};
 setupFeatures(ctx);setupRoles(ctx);setupGoogle(ctx);setupAgenda(ctx);setupWarmup(ctx);setupOperations(ctx);setupDealDetails(ctx);setupCallPanel(ctx);
+// Os dados mudam fora desta tela (as IAs do escritório gravam leads, ligações, negócios e reuniões o tempo todo):
+// com a aba aberta, recarrega a cada 60 s e ao voltar para a aba. Não recarrega com janela aberta, no meio de
+// uma ligação, nem com alguém digitando ou selecionando texto. A rolagem da tela é mantida.
+let ultimaCarga=0,recarregando=false;
+function ocupado(){
+ if(state.modal||state.busy)return true;
+ if(document.querySelector('.featureoverlay,.deal-detail-backdrop,.dial-modal'))return true;
+ const a=document.activeElement;if(a&&(/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||a.isContentEditable))return true;
+ return !!String(window.getSelection?window.getSelection():'').trim();
+}
+async function recarregarSozinho(){
+ if(recarregando||document.hidden||!state.user||state.authMode==='recovery'||ocupado())return;
+ recarregando=true;const sx=window.scrollX,sy=window.scrollY,mb=document.querySelector('#mainBody')?.scrollTop||0;
+ try{await load();await atualizarCliente();window.scrollTo(sx,sy);const m=document.querySelector('#mainBody');if(m)m.scrollTop=mb}
+ catch(e){console.warn('recarga automática',e)}finally{recarregando=false}
+}
+setInterval(recarregarSozinho,60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-ultimaCarga>30000)recarregarSozinho()});
 init();

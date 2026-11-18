@@ -204,6 +204,11 @@ const ETAPAS=['Novo lead','Pesquisa e enriquecimento','Prospecção iniciada','C
 const ETAPAS_NEGOCIO=['Novo','Contato','Qualificado','Proposta','Negociação','Ganho','Perdido'];
 const POR_COLUNA=30;
 let funil=null,funilCarregando=false;
+// recarga automática (app.js): os números e o funil do cliente buscam de novo, sem apagar o que está na tela
+export async function atualizarCliente(){
+ if(!C||!C.state.user||roleIdentity()!=='CLIENTE')return;
+ await Promise.all([painelCarregando?null:carregarPainel(),funilCarregando?null:carregarFunil()]);
+}
 async function carregarFunil(){
  funilCarregando=true;const r=await C.db.rpc('jadem_funil_cliente');funilCarregando=false;
  funil=r.error?{erro:/jadem_funil_cliente|PGRST202|does not exist/i.test(r.error.message+(r.error.code||''))?'o acompanhamento ainda não foi liberado pela Mioli':r.error.message}:(r.data||[]);C.render();
