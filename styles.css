@@ -150,3 +150,8 @@
 .cl-rolagem .cl-kanban{overflow:visible;width:max-content;padding-bottom:0}
 .cl-kanban .kanbancol{max-height:var(--cl-alt,70vh);overflow-y:auto;overscroll-behavior:contain}
 .cl-kanban .kanbanhead{position:sticky;top:-13px;background:#eef2f6;z-index:1;margin:-13px -13px 0;padding:19px 16px 13px;border-radius:14px 14px 0 0}
+
+/* excluir operação: o botão discreto no cartão e a lista das excluídas (com Restaurar) */
+.op-buttons .op-excluir{margin-left:auto;color:#c0392b;border-color:#f0c4bd}.op-buttons .op-excluir:hover{background:#fdecea}
+.op-excluidas{margin:14px 0;padding:12px 16px}.op-excluidas summary{cursor:pointer;font-weight:700;color:#778a9c}
+.op-excluida{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #eef2f6}.op-excluida small{color:#8799aa;flex:1}

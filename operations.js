@@ -7,6 +7,45 @@ const ops=()=>full().clientOperations||[];
 const scoped=['companies','people','deals','tasks','activities','leads','meetings','send','sendCampaigns'];
 const related=['leadEvents','recordings','shares','assignments','stageHistory'];
 const states=['Implantação','Ativa','Pausada','Encerrada'];
+/* Excluir operação (pedido do Murilo, 19/11/2026): a operação vai para status "Excluída" e some do CRM inteiro
+   (listas, seletor, painéis e "Todas as operações"), junto com os leads, reuniões, negócios e tarefas dela.
+   Nada é apagado do banco: em Operações dos Clientes › Excluídas dá para restaurar. */
+const EXCLUIDA='Excluída';
+export function separarExcluidas(d){
+ const todas=d.clientOperations||[],fora=todas.filter(o=>o.status===EXCLUIDA);
+ d.operacoesExcluidas=fora;if(!fora.length)return;
+ const ids=new Set(fora.map(o=>o.id));
+ d.clientOperations=todas.filter(o=>o.status!==EXCLUIDA);
+ for(const n of scoped)if(Array.isArray(d[n]))d[n]=d[n].filter(x=>!ids.has(x.operation_id));
+ const lids=new Set((d.leads||[]).map(x=>x.id));
+ for(const n of related)if(Array.isArray(d[n]))d[n]=d[n].filter(x=>!x.lead_id||lids.has(x.lead_id));
+ if(Array.isArray(d.callHistory))d.callHistory=d.callHistory.filter(x=>!x.lead_id||lids.has(x.lead_id));
+}
+async function excluir(id){
+ const x=ops().find(o=>o.id===id);if(!x||working)return;
+ const n=counts(id);
+ if(!confirm('Excluir a operação '+x.name+'?\n\n• Ela some do CRM, com '+n[0]+' lead(s), '+n[1]+' reunião(ões), '+n[2]+' negócio(s) e '+n[3]+' tarefa(s).\n• Os logins de cliente dessa operação continuam existindo: se não forem mais usar, remova em Equipe.\n\nNada é apagado do banco: dá para restaurar em Operações dos Clientes › Excluídas.'))return;
+ if(prompt('Para confirmar, digite o nome da operação: '+x.name)!==x.name){C.toast('Nome diferente: a operação não foi excluída.');return}
+ working=true;
+ try{
+  const {error}=await C.db.from('jadem_client_operations').update({status:EXCLUIDA,notes:(x.notes?x.notes+'\n':'')+'[status antes de excluir: '+x.status+']',updated_at:new Date().toISOString()}).eq('id',id);
+  if(error)throw error;
+  if(C.state.activeOperation===id){C.state.activeOperation='';try{localStorage.setItem(key(),'')}catch{}}
+  modal=null;await C.load();C.toast('Operação '+x.name+' excluída.');
+ }catch(err){C.toast('Não foi possível excluir: '+err.message)}
+ finally{working=false;C.render()}
+}
+async function restaurar(id){
+ const x=(full().operacoesExcluidas||[]).find(o=>o.id===id);if(!x||working)return;
+ const antes=(/\[status antes de excluir: ([^\]]+)\]\s*$/.exec(x.notes||'')||[])[1];
+ working=true;
+ try{
+  const {error}=await C.db.from('jadem_client_operations').update({status:states.includes(antes)?antes:'Pausada',notes:String(x.notes||'').replace(/\n?\[status antes de excluir: [^\]]+\]\s*$/,''),updated_at:new Date().toISOString()}).eq('id',id);
+  if(error)throw error;
+  await C.load();C.toast('Operação '+x.name+' restaurada.');
+ }catch(err){C.toast('Não foi possível restaurar: '+err.message)}
+ finally{working=false;C.render()}
+}
 function key(){return 'jadem_op_'+C.state.user.id}
 /* ?operacao=<id>&operacao_nome=<nome>: o escritório abre o CRM já na operação do
    andar (cada cliente vê a dele); ?operacao=todas volta para todas. Vale uma vez
@@ -79,8 +118,11 @@ export function operationsView(){
  '<div class="op-commercial">'+(x.setup_value!==null?'<span>Setup '+C.money(Number(x.setup_value))+'</span>':'')+
  (x.commission_percent!==null?'<span>Comissão '+Number(x.commission_percent)+'%</span>':'')+'</div>'+
  '<div class="op-buttons"><button class="btn primary sm" data-op="open:'+x.id+'">Entrar na operação</button>'+
- '<button class="btn outline sm" data-op="edit:'+x.id+'">Editar</button></div></div>';
+ '<button class="btn outline sm" data-op="edit:'+x.id+'">Editar</button>'+
+ '<button class="btn outline sm op-excluir" data-op="excluir:'+x.id+'" title="Excluir esta operação (dá para restaurar)">Excluir</button></div></div>';
  }).join('')+'</div>':'<div class="card op-empty"><h2>Cadastre seu primeiro cliente</h2><p>Crie a operação para separar a prospecção, as reuniões e as vendas.</p><button class="btn primary" data-op="new">Criar operação</button></div>')+
+ ((full().operacoesExcluidas||[]).length?'<details class="card op-excluidas"><summary>Excluídas ('+full().operacoesExcluidas.length+')</summary>'+
+ full().operacoesExcluidas.map(x=>'<div class="op-excluida"><b>'+esc(x.name)+'</b><small>'+esc(x.segment||'')+'</small><button class="btn outline sm" data-op="restaurar:'+x.id+'">Restaurar</button></div>').join('')+'</details>':'')+
  '<div class="notice">Separação interna da Mioli: não habilita logins de clientes. Acesso independente e subdomínios precisarão de permissões específicas numa etapa posterior.</div>';
 }
 const f=(name,label,value='',type='text',rules='')=>'<label class="op-field"><span>'+label+'</span><input name="'+name+'" type="'+type+'" value="'+esc(value??'')+'" '+rules+'></label>';
@@ -177,6 +219,8 @@ function click(e){
  else if(op==='close'){modal=null;C.render()}
  else if(op.startsWith('edit:')){modal=op.slice(5);C.render()}
  else if(op.startsWith('open:'))move(op.slice(5));
+ else if(op.startsWith('excluir:'))excluir(op.slice(8));
+ else if(op.startsWith('restaurar:'))restaurar(op.slice(10));
  else if(op==='modelo-medico')aplicarModelo();
 }
 function change(e){if(e.target.matches('[data-operation-choose]'))move(e.target.value)}
