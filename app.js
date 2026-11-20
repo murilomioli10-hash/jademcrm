@@ -133,11 +133,14 @@ setupFeatures(ctx);setupRoles(ctx);setupGoogle(ctx);setupAgenda(ctx);setupWarmup
 // Os dados mudam fora desta tela (as IAs do escritório gravam leads, ligações, negócios e reuniões o tempo todo):
 // com a aba aberta, recarrega a cada 60 s e ao voltar para a aba. Não recarrega com janela aberta, no meio de
 // uma ligação, nem com alguém digitando ou selecionando texto. A rolagem da tela é mantida.
-let ultimaCarga=0,recarregando=false;
+let ultimaCarga=0,recarregando=false,mexeuSelect=0;
+['focusin','change','pointerdown','keydown'].forEach(ev=>document.addEventListener(ev,e=>{if(e.target&&e.target.tagName==='SELECT')mexeuSelect=Date.now()},true));
 function ocupado(){
  if(state.modal||state.busy)return true;
  if(document.querySelector('.featureoverlay,.deal-detail-backdrop,.dial-modal'))return true;
- const a=document.activeElement;if(a&&(/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||a.isContentEditable))return true;
+ const a=document.activeElement;if(a&&(/^(INPUT|TEXTAREA)$/.test(a.tagName)||a.isContentEditable))return true;
+ // seletor (operação ativa, etapa do card) continua com o foco depois da escolha: só segura a recarga logo depois de mexer nele
+ if(a&&a.tagName==='SELECT'&&Date.now()-mexeuSelect<15000)return true;
  return !!String(window.getSelection?window.getSelection():'').trim();
 }
 async function recarregarSozinho(){
